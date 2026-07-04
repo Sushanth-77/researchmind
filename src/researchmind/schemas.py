@@ -10,6 +10,24 @@ from pydantic import BaseModel, Field
 
 NOT_SPECIFIED = "Not specified"
 
+from typing import Literal
+
+
+class PlannerDecision(BaseModel):
+    """The Planner agent's routing decision for a user query."""
+
+    intent: Literal["single_paper_qa", "metadata_extraction", "comparison"] = Field(
+        description="Which capability should handle this query."
+    )
+    source_files: list[str] = Field(
+        default_factory=list,
+        description="Filenames (from the available list) relevant to this query.",
+    )
+    reasoning: str = Field(
+        default="",
+        description="One-sentence justification for the intent and file selection.",
+    )
+
 
 class PaperMetadata(BaseModel):
     """Structured metadata extracted from a research paper."""

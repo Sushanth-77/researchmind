@@ -92,3 +92,20 @@ def get_chunks_by_source(source_file: str) -> list[tuple[int, str]]:
     ))
     pairs.sort(key=lambda p: p[0])
     return pairs
+
+
+def list_source_files() -> list[str]:
+    """
+    Return the distinct source_file names currently stored in the collection.
+
+    Used by the Planner agent to know which papers it can route queries to,
+    without hardcoding filenames anywhere.
+    """
+    collection = get_collection()
+    results = collection.get()
+
+    if not results["metadatas"]:
+        return []
+
+    sources = {m["source_file"] for m in results["metadatas"]}
+    return sorted(sources)

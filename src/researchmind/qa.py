@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from groq import Groq
 
 from researchmind.config import GROQ_API_KEY, GROQ_MODEL
-from researchmind.retrieval import RetrievedChunk, retrieve
+from researchmind.retrieval import RetrievedChunk, retrieve, retrieve_from_source
 
 DEFAULT_TOP_K = 5
 
@@ -48,20 +48,16 @@ def _build_context_block(chunks: list[RetrievedChunk]) -> str:
     return "\n\n".join(parts)
 
 
-def answer_question(query: str, top_k: int = DEFAULT_TOP_K) -> QAResult:
+def _generate_answer(query: str, chunks: list[RetrievedChunk]) -> str:
     """
-    Answer a question using retrieval-augmented generation.
+    Shared generation step: build the grounded prompt and call Groq.
 
-    Args:
-        query: the user's natural-language question.
-        top_k: number of chunks to retrieve as context.
+    Isolated from retrieval so both whole-collection and single-source
+    QA paths (and the QA agent in Phase 4) reuse identical prompting logic.
 
     Raises:
-        ValueError: propagated from retrieve() if the query is empty or
-            the vector store has no data.
         RuntimeError: if the Groq API call fails.
     """
-    chunks = retrieve(query, top_k=top_k)
     context_block = _build_context_block(chunks)
 
     user_prompt = f"""Context:
@@ -86,6 +82,35 @@ Answer using only the context above, following all rules."""
     except Exception as exc:
         raise RuntimeError(f"Groq API call failed: {exc}") from exc
 
-    answer = response.choices[0].message.content
+    return response.choices[0].message.content
 
+
+def answer_question(query: str, top_k: int = DEFAULT_TOP_K) -> QAResult:
+    """
+    Answer a question using retrieval-augmented generation over the
+    entire collection (all ingested papers).
+
+    Raises:
+        ValueError: propagated from retrieve() if the query is empty or
+            the vector store has no data.
+        RuntimeError: if the Groq API call fails.
+    """
+    chunks = retrieve(query, top_k=top_k)
+    answer = _generate_answer(query, chunks)
+    return QAResult(answer=answer, source_chunks=chunks)
+
+
+def answer_question_for_source(
+    query: str, source_file: str, top_k: int = DEFAULT_TOP_K
+) -> QAResult:
+    """
+    Answer a question using retrieval-augmented generation restricted
+    to a single named paper.
+
+    Raises:
+        ValueError: if query is empty or source_file has no stored chunks.
+        RuntimeError: if the Groq API call fails.
+    """
+    chunks = retrieve_from_source(query, source_file, top_k=top_k)
+    answer = _generate_answer(query, chunks)
     return QAResult(answer=answer, source_chunks=chunks)
