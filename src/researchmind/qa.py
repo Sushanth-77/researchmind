@@ -10,9 +10,7 @@ project, not something to be caught after the fact.
 
 from dataclasses import dataclass
 
-from groq import Groq
-
-from researchmind.config import GROQ_API_KEY, GROQ_MODEL
+from researchmind.observability import call_groq
 from researchmind.retrieval import RetrievedChunk, retrieve, retrieve_from_source
 
 DEFAULT_TOP_K = 5
@@ -53,10 +51,10 @@ def _generate_answer(query: str, chunks: list[RetrievedChunk]) -> str:
     Shared generation step: build the grounded prompt and call Groq.
 
     Isolated from retrieval so both whole-collection and single-source
-    QA paths (and the QA agent in Phase 4) reuse identical prompting logic.
+    QA paths reuse identical prompting logic.
 
     Raises:
-        RuntimeError: if the Groq API call fails.
+        RuntimeError: propagated if the Groq API call fails.
     """
     context_block = _build_context_block(chunks)
 
@@ -67,22 +65,15 @@ Question: {query}
 
 Answer using only the context above, following all rules."""
 
-    client = Groq(api_key=GROQ_API_KEY)
-
-    try:
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=500,
-            temperature=0.0,
-        )
-    except Exception as exc:
-        raise RuntimeError(f"Groq API call failed: {exc}") from exc
-
-    return response.choices[0].message.content
+    result = call_groq(
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        caller="qa._generate_answer",
+        max_tokens=500,
+    )
+    return result.content
 
 
 def answer_question(query: str, top_k: int = DEFAULT_TOP_K) -> QAResult:
@@ -93,7 +84,7 @@ def answer_question(query: str, top_k: int = DEFAULT_TOP_K) -> QAResult:
     Raises:
         ValueError: propagated from retrieve() if the query is empty or
             the vector store has no data.
-        RuntimeError: if the Groq API call fails.
+        RuntimeError: propagated if the Groq API call fails.
     """
     chunks = retrieve(query, top_k=top_k)
     answer = _generate_answer(query, chunks)
@@ -109,7 +100,7 @@ def answer_question_for_source(
 
     Raises:
         ValueError: if query is empty or source_file has no stored chunks.
-        RuntimeError: if the Groq API call fails.
+        RuntimeError: propagated if the Groq API call fails.
     """
     chunks = retrieve_from_source(query, source_file, top_k=top_k)
     answer = _generate_answer(query, chunks)

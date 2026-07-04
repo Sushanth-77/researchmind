@@ -30,3 +30,5 @@ Thumbs.db
 .coverage
 htmlcov/
 data/
+# Local observability logs
+logs/

@@ -15,6 +15,7 @@ dependencies = [
     "chromadb>=0.5.0",
     "pydantic>=2.0.0",
     "langgraph>=0.2.0",
+    "langsmith>=0.1.100",
 ]
 
 [tool.setuptools.packages.find]

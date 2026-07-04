@@ -3,17 +3,15 @@ Planner agent.
 
 Classifies a user query into one of five intents and selects which
 ingested paper(s) are relevant, using Groq with retry-and-repair against
-the PlannerDecision schema (same pattern as Phase 2's metadata extraction,
-since this is the same failure mode: a free model asked for strict JSON).
+the PlannerDecision schema.
 """
 
 import json
 
-from groq import Groq
 from pydantic import ValidationError
 
 from researchmind.agents.messages import AgentMessage
-from researchmind.config import GROQ_API_KEY, GROQ_MODEL
+from researchmind.observability import call_groq
 from researchmind.schemas import PlannerDecision
 
 MAX_ATTEMPTS = 3
@@ -62,57 +60,40 @@ def plan(query: str, available_files: list[str]) -> AgentMessage:
     """
     Produce a routing decision for a query.
 
-    Returns:
-        AgentMessage from "planner" to "orchestrator", whose context dict
-        contains a validated PlannerDecision under the key "decision".
-
     Raises:
-        ValueError: if available_files is empty (nothing to route to).
+        ValueError: if available_files is empty.
         RuntimeError: if Groq fails to produce a valid decision after
             MAX_ATTEMPTS tries, or the API call itself fails.
     """
     if not available_files:
         raise ValueError("No papers available to route queries to. Ingest a paper first.")
 
-    client = Groq(api_key=GROQ_API_KEY)
     files_block = "\n".join(f"- {f}" for f in available_files)
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": f"Available papers:\n{files_block}\n\nUser query: {query}",
-        },
+        {"role": "user", "content": f"Available papers:\n{files_block}\n\nUser query: {query}"},
     ]
 
     last_error = ""
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        try:
-            response = client.chat.completions.create(
-                model=GROQ_MODEL,
-                messages=messages,
-                max_tokens=300,
-                temperature=0.0,
-            )
-        except Exception as exc:
-            raise RuntimeError(f"Groq API call failed: {exc}") from exc
-
-        raw_output = response.choices[0].message.content
+        result = call_groq(
+            messages=messages,
+            caller=f"planner.plan[attempt={attempt}]",
+            max_tokens=300,
+        )
+        raw_output = result.content
         cleaned = _strip_code_fences(raw_output)
 
         try:
             data = json.loads(cleaned)
             decision = PlannerDecision.model_validate(data)
 
-            # Guard against hallucinated filenames not in the available list.
             invalid = [f for f in decision.source_files if f not in available_files]
             if invalid:
                 raise ValueError(f"Referenced unknown file(s): {invalid}")
 
-            # An empty source_files list is a valid, intentional signal for
-            # "use all papers" on analysis/survey intents — not a low-confidence
-            # result, so confidence only drops on an actual validation failure.
             return AgentMessage(
                 sender="planner",
                 receiver="orchestrator",

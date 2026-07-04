@@ -1,13 +1,6 @@
 """
 Structured metadata extraction with retry/repair.
 
-Strategy: research papers put title/authors/abstract at the very start,
-but methodology/dataset/metrics can appear anywhere. So context is built
-from two sources: the paper's first few chunks (by position) plus a
-semantic search for methodology/dataset/metrics language. This is the
-same recall concern flagged in Phase 1 — a single strategy (position-only
-or similarity-only) risks missing fields that live outside its coverage.
-
 The free Groq model is not guaranteed to return valid JSON on the first
 try. Rather than fail outright, we send the parsing/validation error back
 to the model and ask it to correct its own output, up to MAX_ATTEMPTS times.
@@ -15,10 +8,9 @@ to the model and ask it to correct its own output, up to MAX_ATTEMPTS times.
 
 import json
 
-from groq import Groq
 from pydantic import ValidationError
 
-from researchmind.config import GROQ_API_KEY, GROQ_MODEL
+from researchmind.observability import call_groq
 from researchmind.retrieval import retrieve
 from researchmind.schemas import PaperMetadata
 from researchmind.vectorstore import get_chunks_by_source
@@ -68,21 +60,6 @@ def _gather_context(source_file: str) -> str:
     return "\n\n".join(f"[chunk {idx}]\n{text}" for idx, text in combined)
 
 
-def _call_groq(client: Groq, messages: list[dict]) -> str:
-    """Single Groq call, isolated for reuse across retry attempts."""
-    try:
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=messages,
-            max_tokens=800,
-            temperature=0.0,
-        )
-    except Exception as exc:
-        raise RuntimeError(f"Groq API call failed: {exc}") from exc
-
-    return response.choices[0].message.content
-
-
 def _strip_code_fences(text: str) -> str:
     """Defensively strip markdown code fences if the model adds them anyway."""
     text = text.strip()
@@ -106,7 +83,6 @@ def extract_metadata(source_file: str) -> PaperMetadata:
             MAX_ATTEMPTS tries, or if the API itself fails.
     """
     context = _gather_context(source_file)
-    client = Groq(api_key=GROQ_API_KEY)
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -116,7 +92,12 @@ def extract_metadata(source_file: str) -> PaperMetadata:
     last_error: str = ""
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        raw_output = _call_groq(client, messages)
+        result = call_groq(
+            messages=messages,
+            caller=f"metadata_extraction.extract_metadata[attempt={attempt}]",
+            max_tokens=800,
+        )
+        raw_output = result.content
         cleaned = _strip_code_fences(raw_output)
 
         try:
@@ -127,7 +108,6 @@ def extract_metadata(source_file: str) -> PaperMetadata:
         except ValidationError as exc:
             last_error = f"Your JSON did not match the required schema: {exc}"
 
-        # Feed the error back to the model and ask it to fix its own output.
         messages.append({"role": "assistant", "content": raw_output})
         messages.append({
             "role": "user",

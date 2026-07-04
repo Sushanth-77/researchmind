@@ -30,6 +30,12 @@ GROQ_API_KEY: str = _require_env("GROQ_API_KEY")
 GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
+# Optional: LangSmith tracing (free tier). If LANGCHAIN_API_KEY is unset,
+# LangGraph simply runs untraced — this is opt-in, not required.
+if os.getenv("LANGCHAIN_API_KEY") and not os.getenv("LANGCHAIN_API_KEY").startswith("your_"):
+    os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+    os.environ.setdefault("LANGCHAIN_PROJECT", os.getenv("LANGCHAIN_PROJECT", "researchmind"))
+
 # Standard paths used across phases
 DATA_DIR = PROJECT_ROOT / "data"
 CHROMA_DIR = PROJECT_ROOT / "chroma_db"

@@ -8,10 +8,8 @@ narrative thread, rather than inventing one to satisfy a "survey" format.
 
 from dataclasses import dataclass
 
-from groq import Groq
-
-from researchmind.config import GROQ_API_KEY, GROQ_MODEL
 from researchmind.metadata_extraction import extract_metadata
+from researchmind.observability import call_groq
 from researchmind.retrieval import retrieve_from_source
 
 DEFAULT_TOP_K_PER_PAPER = 6
@@ -64,7 +62,7 @@ def generate_survey(source_files: list[str]) -> SurveyResult:
 
     Raises:
         ValueError: if source_files is empty.
-        RuntimeError: if the Groq API call fails.
+        RuntimeError: propagated if the Groq API call fails.
     """
     if not source_files:
         raise ValueError("At least one source file is required for a survey.")
@@ -77,20 +75,13 @@ def generate_survey(source_files: list[str]) -> SurveyResult:
 
 Write the survey following all rules."""
 
-    client = Groq(api_key=GROQ_API_KEY)
+    result = call_groq(
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        caller="survey.generate_survey",
+        max_tokens=800,
+    )
 
-    try:
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=800,
-            temperature=0.0,
-        )
-    except Exception as exc:
-        raise RuntimeError(f"Groq API call failed: {exc}") from exc
-
-    answer = response.choices[0].message.content
-    return SurveyResult(answer=answer, source_files=source_files)
+    return SurveyResult(answer=result.content, source_files=source_files)

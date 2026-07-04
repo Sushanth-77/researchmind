@@ -1,19 +1,16 @@
 """
 Cross-paper trend detection and research-gap analysis.
 
-Unlike Phases 1-5, there is no single correct answer here, so the main
-engineering risk shifts from "does it hallucinate a specific fact" to
-"does it manufacture a false pattern because it was asked to find one."
-The system prompt explicitly permits — and expects — the model to say
-two papers don't meaningfully relate, rather than force a connection.
+There is no single correct answer here, so the main engineering risk
+shifts from "does it hallucinate a specific fact" to "does it manufacture
+a false pattern because it was asked to find one." The system prompt
+explicitly permits the model to say two papers don't meaningfully relate.
 """
 
 from dataclasses import dataclass
 
-from groq import Groq
-
-from researchmind.config import GROQ_API_KEY, GROQ_MODEL
 from researchmind.metadata_extraction import extract_metadata
+from researchmind.observability import call_groq
 from researchmind.retrieval import retrieve_from_source
 
 DEFAULT_TOP_K_PER_PAPER = 6
@@ -70,7 +67,7 @@ def analyze_trends_and_gaps(source_files: list[str]) -> AnalysisResult:
 
     Raises:
         ValueError: if source_files is empty.
-        RuntimeError: if the Groq API call fails.
+        RuntimeError: propagated if the Groq API call fails.
     """
     if not source_files:
         raise ValueError("At least one source file is required for analysis.")
@@ -84,20 +81,13 @@ def analyze_trends_and_gaps(source_files: list[str]) -> AnalysisResult:
 Identify any genuine cross-paper trends and suggest concrete research gaps or open \
 questions that follow from these papers, following all rules."""
 
-    client = Groq(api_key=GROQ_API_KEY)
+    result = call_groq(
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        caller="analysis.analyze_trends_and_gaps",
+        max_tokens=800,
+    )
 
-    try:
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=800,
-            temperature=0.0,
-        )
-    except Exception as exc:
-        raise RuntimeError(f"Groq API call failed: {exc}") from exc
-
-    answer = response.choices[0].message.content
-    return AnalysisResult(answer=answer, source_files=source_files)
+    return AnalysisResult(answer=result.content, source_files=source_files)
