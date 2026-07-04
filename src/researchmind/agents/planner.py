@@ -1,7 +1,7 @@
 """
 Planner agent.
 
-Classifies a user query into one of three intents and selects which
+Classifies a user query into one of five intents and selects which
 ingested paper(s) are relevant, using Groq with retry-and-repair against
 the PlannerDecision schema (same pattern as Phase 2's metadata extraction,
 since this is the same failure mode: a free model asked for strict JSON).
@@ -27,17 +27,24 @@ Intents:
 whichever paper seems most relevant if none is named.
 - "metadata_extraction": the user wants structured facts about a paper (title, \
 authors, methodology, dataset, evaluation metrics) rather than a specific answer.
-- "comparison": the user wants two or more papers compared or contrasted.
+- "comparison": the user wants two or more specific papers compared or contrasted.
+- "analysis": the user wants cross-paper trends, patterns, or research-gap \
+identification across the ingested papers.
+- "survey": the user wants a literature-review-style synthesis or summary across \
+papers.
 
 Respond with ONLY a JSON object, no preamble, no markdown fences. The JSON must have \
 exactly these keys:
-- "intent": one of "single_paper_qa", "metadata_extraction", "comparison"
+- "intent": one of "single_paper_qa", "metadata_extraction", "comparison", \
+"analysis", "survey"
 - "source_files": array of filenames chosen from the available list (exact matches only)
 - "reasoning": one sentence explaining the choice
 
 For "single_paper_qa", include exactly one filename unless the query is genuinely \
 ambiguous across papers, in which case include the most likely one. For "comparison", \
-include two or more filenames. Never invent a filename not in the available list."""
+include two or more filenames. For "analysis" and "survey", include specific \
+filenames only if the user names them; otherwise leave source_files as an empty array \
+to signal "use all ingested papers." Never invent a filename not in the available list."""
 
 
 def _strip_code_fences(text: str) -> str:
@@ -103,12 +110,14 @@ def plan(query: str, available_files: list[str]) -> AgentMessage:
             if invalid:
                 raise ValueError(f"Referenced unknown file(s): {invalid}")
 
-            confidence = 1.0 if not invalid and decision.source_files else 0.5
+            # An empty source_files list is a valid, intentional signal for
+            # "use all papers" on analysis/survey intents — not a low-confidence
+            # result, so confidence only drops on an actual validation failure.
             return AgentMessage(
                 sender="planner",
                 receiver="orchestrator",
                 context={"decision": decision, "query": query},
-                confidence=confidence,
+                confidence=1.0,
             )
         except json.JSONDecodeError as exc:
             last_error = f"Your response was not valid JSON: {exc}"

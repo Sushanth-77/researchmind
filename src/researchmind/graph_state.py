@@ -1,11 +1,11 @@
 """
 Graph state definitions for the LangGraph orchestration.
 
-Each agent owns a namespaced slice of the overall graph state (PlannerState,
-ExtractorState, QAState) and only ever reads/writes its own slice. Nodes
-do not reach into another agent's namespace directly — anything one agent
-needs from another is passed explicitly through routing logic in graph.py,
-mirroring the AgentMessage-based isolation from Phase 4's manual orchestrator.
+Each agent owns a namespaced slice of the overall graph state and only
+ever reads/writes its own slice. Nodes do not reach into another agent's
+namespace directly — anything one agent needs from another is passed
+explicitly through routing logic in graph.py, mirroring the
+AgentMessage-based isolation from Phase 4's manual orchestrator.
 
 This isolation is what makes the graph safe to extend later: a new agent
 gets its own namespace and cannot silently overwrite another agent's data,
@@ -37,6 +37,18 @@ class QAState(TypedDict):
     answer: Optional[str]
 
 
+class AnalysisState(TypedDict):
+    """Analysis agent's isolated state slice."""
+
+    answer: Optional[str]
+
+
+class SurveyState(TypedDict):
+    """Survey agent's isolated state slice."""
+
+    answer: Optional[str]
+
+
 class GraphState(TypedDict):
     """
     Overall graph state.
@@ -52,5 +64,7 @@ class GraphState(TypedDict):
     planner: PlannerState
     extractor: ExtractorState
     qa: QAState
+    analysis: AnalysisState
+    survey: SurveyState
     trace: Annotated[list[AgentMessage], operator.add]
     final_answer: Optional[str]

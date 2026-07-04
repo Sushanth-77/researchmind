@@ -8,7 +8,7 @@ LangGraph merges these partial updates, so no node can accidentally
 overwrite a field owned by another agent.
 """
 
-from researchmind.agents import extractor, planner, qa_agent
+from researchmind.agents import analysis_agent, extractor, planner, qa_agent, survey_agent
 from researchmind.graph_state import GraphState
 from researchmind.schemas import PaperMetadata
 from researchmind.vectorstore import list_source_files
@@ -52,12 +52,41 @@ def qa_node(state: GraphState) -> dict:
     }
 
 
-def route_by_intent(state: GraphState) -> str:
-    """Conditional edge: send to the extractor or qa node based on intent."""
+def analysis_node(state: GraphState) -> dict:
+    """Run the Analysis agent and populate the 'analysis' namespace only."""
     decision = state["planner"]["decision"]
-    if decision.intent == "metadata_extraction":
-        return "extractor"
-    return "qa"
+    msg = analysis_agent.analyze(decision.source_files)
+    answer_text = msg.context["answer"]
+
+    return {
+        "analysis": {"answer": answer_text},
+        "trace": [msg],
+        "final_answer": answer_text,
+    }
+
+
+def survey_node(state: GraphState) -> dict:
+    """Run the Survey agent and populate the 'survey' namespace only."""
+    decision = state["planner"]["decision"]
+    msg = survey_agent.survey(decision.source_files)
+    answer_text = msg.context["answer"]
+
+    return {
+        "survey": {"answer": answer_text},
+        "trace": [msg],
+        "final_answer": answer_text,
+    }
+
+
+def route_by_intent(state: GraphState) -> str:
+    """Conditional edge: send to the node matching the Planner's intent."""
+    decision = state["planner"]["decision"]
+    routing_map = {
+        "metadata_extraction": "extractor",
+        "analysis": "analysis",
+        "survey": "survey",
+    }
+    return routing_map.get(decision.intent, "qa")
 
 
 def _format_metadata_answer(metadata_by_file: dict[str, PaperMetadata]) -> str:
