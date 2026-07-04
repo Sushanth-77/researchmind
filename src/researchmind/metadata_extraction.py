@@ -11,7 +11,7 @@ import json
 from pydantic import ValidationError
 
 from researchmind.observability import call_groq
-from researchmind.retrieval import retrieve
+from researchmind.retrieval import retrieve_from_source
 from researchmind.schemas import PaperMetadata
 from researchmind.vectorstore import get_chunks_by_source
 
@@ -39,12 +39,18 @@ def _gather_context(source_file: str) -> str:
     """
     Build extraction context from opening chunks + semantically retrieved
     methodology/dataset/metric-relevant chunks, deduplicated by chunk_index.
+
+    Both retrieval steps are scoped to source_file via retrieve_from_source —
+    using the unscoped retrieve() here was a latent bug (fixed post-Phase-7)
+    that let other papers' chunks leak into this paper's extraction context
+    when their content scored well against the semantic query.
     """
     all_chunks = get_chunks_by_source(source_file)
     opening = all_chunks[:OPENING_CHUNKS_COUNT]
 
-    semantic_hits = retrieve(
+    semantic_hits = retrieve_from_source(
         "research methodology, dataset, and evaluation metrics used in this study",
+        source_file,
         top_k=SEMANTIC_TOP_K,
     )
 
