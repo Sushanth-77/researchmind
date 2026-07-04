@@ -68,3 +68,27 @@ def store_chunks(chunks: list[Chunk]) -> None:
         documents=documents,
         metadatas=metadatas,
     )
+
+
+def get_chunks_by_source(source_file: str) -> list[tuple[int, str]]:
+    """
+    Fetch all chunks for a given source file, ordered by chunk_index.
+
+    Used for metadata extraction, where we need the paper's opening
+    chunks (title/authors/abstract) rather than semantically-ranked ones.
+
+    Raises:
+        ValueError: if no chunks exist for source_file.
+    """
+    collection = get_collection()
+    results = collection.get(where={"source_file": source_file})
+
+    if not results["documents"]:
+        raise ValueError(f"No chunks found for source_file: {source_file}")
+
+    pairs = list(zip(
+        [m["chunk_index"] for m in results["metadatas"]],
+        results["documents"],
+    ))
+    pairs.sort(key=lambda p: p[0])
+    return pairs
