@@ -1,5 +1,7 @@
 """
-Summarize structured Groq call logs: totals and per-caller breakdown.
+Summarize structured Groq call logs: totals and per-caller breakdown,
+including min/max latency so a single outlier call can be distinguished
+from a genuinely slow caller.
 
 Run: python scripts/view_logs.py
 """
@@ -41,18 +43,22 @@ def main() -> None:
     print(f"Total cost: $0.00 (Groq free tier)")
 
     print(f"\n--- Breakdown by caller ---")
-    by_caller = defaultdict(lambda: {"calls": 0, "tokens": 0, "latency": 0.0})
+    by_caller = defaultdict(lambda: {"calls": 0, "tokens": 0, "latency": 0.0, "latencies": []})
     for e in entries:
         stats = by_caller[e["caller"]]
         stats["calls"] += 1
         stats["tokens"] += e["total_tokens"] or 0
         stats["latency"] += e["latency_seconds"]
+        stats["latencies"].append(e["latency_seconds"])
 
     for caller, stats in sorted(by_caller.items()):
         avg_latency = stats["latency"] / stats["calls"]
         print(
             f"  {caller}: {stats['calls']} calls, "
-            f"{stats['tokens']} tokens, avg {avg_latency:.2f}s/call"
+            f"{stats['tokens']} tokens, "
+            f"avg {avg_latency:.2f}s, "
+            f"min {min(stats['latencies']):.2f}s, "
+            f"max {max(stats['latencies']):.2f}s"
         )
 
     if errors:

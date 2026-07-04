@@ -40,10 +40,13 @@ def _gather_context(source_file: str) -> str:
     Build extraction context from opening chunks + semantically retrieved
     methodology/dataset/metric-relevant chunks, deduplicated by chunk_index.
 
-    Both retrieval steps are scoped to source_file via retrieve_from_source —
-    using the unscoped retrieve() here was a latent bug (fixed post-Phase-7)
-    that let other papers' chunks leak into this paper's extraction context
-    when their content scored well against the semantic query.
+    Both retrieval steps are scoped to source_file via retrieve_from_source.
+    Previously the semantic step used the unscoped retrieve(), which let
+    other papers' chunks leak into this paper's extraction context whenever
+    their content scored well against the semantic query — this caused a
+    reproducible cross-paper attribution bug (e.g. one paper's dataset
+    description bleeding into another paper's metadata). Fixed by scoping
+    both retrieval calls to the same source_file.
     """
     all_chunks = get_chunks_by_source(source_file)
     opening = all_chunks[:OPENING_CHUNKS_COUNT]

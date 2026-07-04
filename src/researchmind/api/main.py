@@ -9,14 +9,17 @@ Endpoints:
 - GET  /health                basic liveness check
 
 Every domain exception (ValueError for bad input, RuntimeError for
-upstream Groq failures) is mapped to a specific HTTP status via the
-exception handlers below, rather than surfacing as an unhandled 500.
+upstream Groq failures) and every request-schema validation failure is
+mapped to a specific HTTP status with a uniform ErrorResponse body via
+the handlers below, rather than surfacing as an unhandled 500 or
+FastAPI's default (differently-shaped) validation error format.
 """
 
 import uuid
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
 
@@ -57,6 +60,27 @@ async def runtime_error_handler(request: Request, exc: RuntimeError) -> JSONResp
     return JSONResponse(
         status_code=502,
         content=ErrorResponse(error="upstream_failure", detail=str(exc)).model_dump(),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """
+    Normalize Pydantic's default validation error shape (a list of error
+    dicts under "detail") to the same ErrorResponse shape used by every
+    other error in this API. Status stays 422, since that's still the
+    correct code for "request body doesn't match the schema" — only the
+    body shape changes, so callers can handle all errors uniformly.
+    """
+    first_error = exc.errors()[0]
+    field = ".".join(str(loc) for loc in first_error["loc"] if loc != "body")
+    detail = f"{field}: {first_error['msg']}" if field else first_error["msg"]
+
+    return JSONResponse(
+        status_code=422,
+        content=ErrorResponse(error="validation_error", detail=detail).model_dump(),
     )
 
 
