@@ -27,7 +27,11 @@ def query_graph(query: str) -> AgentMessage:
     """
     lowered = query.lower()
 
-    if "author" in lowered and any(w in lowered for w in ("shared", "common", "both", "multiple")):
+    if "author" in lowered and (
+        any(w in lowered for w in ("shared", "common", "both", "multiple"))
+        or "more than one" in lowered
+        or "more than 1" in lowered
+    ):
         shared = find_shared_authors()
         answer = (
             "\n".join(f"{s['author']} appears on: {', '.join(s['papers'])}" for s in shared)
