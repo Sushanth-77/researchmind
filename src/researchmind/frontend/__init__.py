@@ -1,0 +1,1 @@
+"""Frontend package: HTTP client for the ResearchMind FastAPI backend."""

@@ -19,6 +19,8 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "python-multipart>=0.0.9",
+    "streamlit>=1.38.0",
+    "requests>=2.32.0",
 ]
 
 [tool.setuptools.packages.find]
