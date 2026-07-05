@@ -49,6 +49,12 @@ class SurveyState(TypedDict):
     answer: Optional[str]
 
 
+class KGState(TypedDict):
+    """Knowledge Graph agent's isolated state slice."""
+
+    answer: Optional[str]
+
+
 class GraphState(TypedDict):
     """
     Overall graph state.
@@ -66,5 +72,6 @@ class GraphState(TypedDict):
     qa: QAState
     analysis: AnalysisState
     survey: SurveyState
+    kg: KGState
     trace: Annotated[list[AgentMessage], operator.add]
     final_answer: Optional[str]

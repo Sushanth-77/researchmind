@@ -1,6 +1,6 @@
 """
-LangGraph state machine wiring Planner -> (Extractor | QA | Analysis | Survey)
-based on intent.
+LangGraph state machine wiring Planner -> (Extractor | QA | Analysis |
+Survey | KG) based on intent.
 
 Rebuilds Phase 4's manual orchestrator.handle_query as a graph: same
 agents, same AgentMessage trace, same isolated-state discipline — but
@@ -13,6 +13,7 @@ from langgraph.graph import END, START, StateGraph
 from researchmind.graph_nodes import (
     analysis_node,
     extractor_node,
+    kg_node,
     planner_node,
     qa_node,
     route_by_intent,
@@ -30,6 +31,7 @@ def build_graph():
     graph.add_node("qa", qa_node)
     graph.add_node("analysis", analysis_node)
     graph.add_node("survey", survey_node)
+    graph.add_node("kg", kg_node)
 
     graph.add_edge(START, "planner")
     graph.add_conditional_edges(
@@ -40,12 +42,14 @@ def build_graph():
             "qa": "qa",
             "analysis": "analysis",
             "survey": "survey",
+            "kg": "kg",
         },
     )
     graph.add_edge("extractor", END)
     graph.add_edge("qa", END)
     graph.add_edge("analysis", END)
     graph.add_edge("survey", END)
+    graph.add_edge("kg", END)
 
     return graph.compile()
 
@@ -67,6 +71,7 @@ def run_query(query: str) -> GraphState:
         "qa": {"answer": None},
         "analysis": {"answer": None},
         "survey": {"answer": None},
+        "kg": {"answer": None},
         "trace": [],
         "final_answer": None,
     }

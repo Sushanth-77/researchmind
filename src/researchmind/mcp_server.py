@@ -3,23 +3,24 @@ MCP server exposing ResearchMind's capabilities to any MCP-compatible
 client (e.g. Claude Desktop), over stdio.
 
 Tools vs. resource: tools are actions an MCP client's model decides to
-invoke (search arXiv, ingest a paper, ask a question); the resource is
-context a host can attach directly without a tool call, which fits
-"list of currently ingested papers" well — the filesystem-browsing
-capability, scoped to this project's data/papers directory rather than
-the whole OS filesystem.
+invoke; the resource is context a host can attach directly without a
+tool call, which fits "list of currently ingested papers" well — the
+filesystem-browsing capability, scoped to this project's data/papers
+directory rather than the whole OS filesystem.
 
 Every function here is a thin wrapper around existing pipeline code
-(ingestion, vectorstore, graph) — no logic is duplicated, only exposed
-through a new transport.
+(ingestion, vectorstore, graph, knowledge_graph) — no logic is
+duplicated, only exposed through a new transport.
 """
 
 from mcp.server.fastmcp import FastMCP
 
+from researchmind.agents.graph_agent import query_graph as _query_graph
 from researchmind.arxiv_client import fetch_arxiv_pdf, search_arxiv
 from researchmind.config import DATA_DIR
 from researchmind.graph import run_query
 from researchmind.ingestion import ingest_pdf
+from researchmind.knowledge_graph import populate_graph_for_all_papers
 from researchmind.vectorstore import list_source_files, store_chunks
 
 mcp = FastMCP("ResearchMind")
@@ -65,8 +66,8 @@ def ingest_arxiv_paper(arxiv_id: str) -> dict:
 def ask_researchmind(query: str) -> dict:
     """
     Ask a question about the ingested papers. Routes automatically to
-    single-paper Q&A, metadata extraction, comparison, analysis, or
-    survey generation based on the question.
+    single-paper Q&A, metadata extraction, comparison, analysis, survey
+    generation, or knowledge-graph lookup based on the question.
     """
     result = run_query(query)
     decision = result["planner"]["decision"]
@@ -76,6 +77,19 @@ def ask_researchmind(query: str) -> dict:
         "source_files": decision.source_files,
         "answer": result["final_answer"],
     }
+
+
+@mcp.tool()
+def populate_knowledge_graph() -> list[dict]:
+    """Populate the Neo4j knowledge graph from all currently ingested papers."""
+    return populate_graph_for_all_papers()
+
+
+@mcp.tool()
+def query_knowledge_graph(query: str) -> str:
+    """Query the knowledge graph for structural facts (shared authors, papers by metric, summary)."""
+    msg = _query_graph(query)
+    return msg.context["answer"]
 
 
 @mcp.resource("papers://ingested")

@@ -1,7 +1,7 @@
 """
 Planner agent.
 
-Classifies a user query into one of five intents and selects which
+Classifies a user query into one of six intents and selects which
 ingested paper(s) are relevant, using Groq with retry-and-repair against
 the PlannerDecision schema.
 """
@@ -30,19 +30,23 @@ authors, methodology, dataset, evaluation metrics) rather than a specific answer
 identification across the ingested papers.
 - "survey": the user wants a literature-review-style synthesis or summary across \
 papers.
+- "knowledge_graph": the user wants structural facts derived from the paper graph \
+itself (e.g. shared authors across papers, which papers use a given evaluation \
+metric, or a graph-wide summary) rather than content from within a paper.
 
 Respond with ONLY a JSON object, no preamble, no markdown fences. The JSON must have \
 exactly these keys:
 - "intent": one of "single_paper_qa", "metadata_extraction", "comparison", \
-"analysis", "survey"
+"analysis", "survey", "knowledge_graph"
 - "source_files": array of filenames chosen from the available list (exact matches only)
 - "reasoning": one sentence explaining the choice
 
 For "single_paper_qa", include exactly one filename unless the query is genuinely \
 ambiguous across papers, in which case include the most likely one. For "comparison", \
-include two or more filenames. For "analysis" and "survey", include specific \
-filenames only if the user names them; otherwise leave source_files as an empty array \
-to signal "use all ingested papers." Never invent a filename not in the available list."""
+include two or more filenames. For "analysis", "survey", and "knowledge_graph", include \
+specific filenames only if the user names them; otherwise leave source_files as an \
+empty array to signal "use all ingested papers." Never invent a filename not in the \
+available list."""
 
 
 def _strip_code_fences(text: str) -> str:

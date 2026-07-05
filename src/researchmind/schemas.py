@@ -44,6 +44,7 @@ class PlannerDecision(BaseModel):
         "comparison",
         "analysis",
         "survey",
+        "knowledge_graph",
     ] = Field(description="Which capability should handle this query.")
     source_files: list[str] = Field(
         default_factory=list,

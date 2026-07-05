@@ -8,7 +8,14 @@ LangGraph merges these partial updates, so no node can accidentally
 overwrite a field owned by another agent.
 """
 
-from researchmind.agents import analysis_agent, extractor, planner, qa_agent, survey_agent
+from researchmind.agents import (
+    analysis_agent,
+    extractor,
+    graph_agent,
+    planner,
+    qa_agent,
+    survey_agent,
+)
 from researchmind.graph_state import GraphState
 from researchmind.schemas import PaperMetadata
 from researchmind.vectorstore import list_source_files
@@ -78,6 +85,18 @@ def survey_node(state: GraphState) -> dict:
     }
 
 
+def kg_node(state: GraphState) -> dict:
+    """Run the Knowledge Graph agent and populate the 'kg' namespace only."""
+    msg = graph_agent.query_graph(state["query"])
+    answer_text = msg.context["answer"]
+
+    return {
+        "kg": {"answer": answer_text},
+        "trace": [msg],
+        "final_answer": answer_text,
+    }
+
+
 def route_by_intent(state: GraphState) -> str:
     """Conditional edge: send to the node matching the Planner's intent."""
     decision = state["planner"]["decision"]
@@ -85,6 +104,7 @@ def route_by_intent(state: GraphState) -> str:
         "metadata_extraction": "extractor",
         "analysis": "analysis",
         "survey": "survey",
+        "knowledge_graph": "kg",
     }
     return routing_map.get(decision.intent, "qa")
 
