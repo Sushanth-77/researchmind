@@ -30,14 +30,14 @@ async def main() -> None:
 
             print("\n--- Calling list_ingested_papers ---")
             result = await session.call_tool("list_ingested_papers", {})
-            print(result.content[0].text)
+            print("\n".join(block.text for block in result.content))
 
             print("\n--- Calling search_arxiv_papers ---")
             result = await session.call_tool(
                 "search_arxiv_papers",
                 {"query": "prompt engineering large language models", "max_results": 3},
             )
-            print(result.content[0].text)
+            print("\n".join(block.text for block in result.content))
 
             print("\n--- Reading papers://ingested resource ---")
             resource_result = await session.read_resource("papers://ingested")
