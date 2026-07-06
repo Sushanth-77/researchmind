@@ -1,18 +1,5 @@
 """
 FastAPI application wrapping the ResearchMind LangGraph orchestration.
-
-Endpoints:
-- POST /papers/ingest        upload a PDF, ingestion runs in the background
-- GET  /papers/ingest/{id}   poll ingestion status
-- GET  /papers               list papers currently in the vector store
-- POST /query                run a query through the orchestration graph
-- GET  /health                basic liveness check
-
-Every domain exception (ValueError for bad input, RuntimeError for
-upstream Groq failures) and every request-schema validation failure is
-mapped to a specific HTTP status with a uniform ErrorResponse body via
-the handlers below, rather than surfacing as an unhandled 500 or
-FastAPI's default (differently-shaped) validation error format.
 """
 
 import uuid
@@ -47,7 +34,6 @@ app = FastAPI(
 
 @app.exception_handler(ValueError)
 async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
-    """Bad input (empty query, unknown paper, no papers ingested) -> 400."""
     return JSONResponse(
         status_code=400,
         content=ErrorResponse(error="invalid_request", detail=str(exc)).model_dump(),
@@ -56,7 +42,6 @@ async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse
 
 @app.exception_handler(RuntimeError)
 async def runtime_error_handler(request: Request, exc: RuntimeError) -> JSONResponse:
-    """Upstream Groq API failure -> 502 (this service is fine, the dependency isn't)."""
     return JSONResponse(
         status_code=502,
         content=ErrorResponse(error="upstream_failure", detail=str(exc)).model_dump(),
@@ -64,20 +49,10 @@ async def runtime_error_handler(request: Request, exc: RuntimeError) -> JSONResp
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_error_handler(
-    request: Request, exc: RequestValidationError
-) -> JSONResponse:
-    """
-    Normalize Pydantic's default validation error shape (a list of error
-    dicts under "detail") to the same ErrorResponse shape used by every
-    other error in this API. Status stays 422, since that's still the
-    correct code for "request body doesn't match the schema" — only the
-    body shape changes, so callers can handle all errors uniformly.
-    """
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     first_error = exc.errors()[0]
     field = ".".join(str(loc) for loc in first_error["loc"] if loc != "body")
     detail = f"{field}: {first_error['msg']}" if field else first_error["msg"]
-
     return JSONResponse(
         status_code=422,
         content=ErrorResponse(error="validation_error", detail=detail).model_dump(),
@@ -86,18 +61,11 @@ async def validation_error_handler(
 
 @app.get("/health")
 def health() -> dict:
-    """Basic liveness check."""
     return {"status": "ok"}
 
 
 @app.post("/papers/ingest", response_model=IngestResponse, status_code=202)
 async def ingest_paper(file: UploadFile, background_tasks: BackgroundTasks) -> IngestResponse:
-    """
-    Accept a PDF upload and ingest it in the background.
-
-    Returns immediately with a task_id; poll GET /papers/ingest/{task_id}
-    for completion status. Rejects non-PDF uploads before saving anything.
-    """
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only .pdf files are accepted.")
 
@@ -120,7 +88,6 @@ async def ingest_paper(file: UploadFile, background_tasks: BackgroundTasks) -> I
 
 @app.get("/papers/ingest/{task_id}", response_model=IngestStatusResponse)
 def get_ingest_status(task_id: str) -> IngestStatusResponse:
-    """Poll the status of a previously submitted ingestion task."""
     record = task_store.get_task(task_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"Unknown task_id: {task_id}")
@@ -136,21 +103,18 @@ def get_ingest_status(task_id: str) -> IngestStatusResponse:
 
 @app.get("/papers", response_model=PapersListResponse)
 def get_papers() -> PapersListResponse:
-    """List papers currently stored in the vector store."""
     return PapersListResponse(papers=list_source_files())
 
 
 @app.post("/query", response_model=QueryResponse)
 def query(request: QueryRequest) -> QueryResponse:
     """
-    Run a query through the Planner -> (Extractor | QA | Analysis | Survey)
-    LangGraph orchestration and return the final answer with trace.
-
-    Raises (mapped by the handlers above):
-        ValueError -> 400: no papers ingested, empty query, unknown filename.
-        RuntimeError -> 502: a Groq API call failed after retries.
+    Run a query through the Contextualizer -> Planner -> (Extractor | QA |
+    Analysis | Survey | KG) LangGraph orchestration. conversation_history,
+    if provided, lets follow-up questions resolve references to prior turns.
     """
-    result = run_query(request.query)
+    history = [turn.model_dump() for turn in request.conversation_history]
+    result = run_query(request.query, conversation_history=history)
     decision = result["planner"]["decision"]
 
     trace = [

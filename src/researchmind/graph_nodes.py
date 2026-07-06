@@ -1,11 +1,9 @@
 """
 Node functions for the LangGraph orchestration.
 
-Each node function reads only the namespace(s) it needs (its own, plus
-the Planner's decision when it must route work) and returns a partial
-state update touching only its own namespace — never the full state.
-LangGraph merges these partial updates, so no node can accidentally
-overwrite a field owned by another agent.
+Each node function reads only the namespace(s) it needs and returns a
+partial state update touching only its own namespace — LangGraph merges
+these, so no node can accidentally overwrite a field owned by another agent.
 """
 
 from researchmind.agents import (
@@ -16,9 +14,31 @@ from researchmind.agents import (
     qa_agent,
     survey_agent,
 )
+from researchmind.agents.messages import AgentMessage
+from researchmind.conversation import contextualize_query
 from researchmind.graph_state import GraphState
 from researchmind.schemas import PaperMetadata
 from researchmind.vectorstore import list_source_files
+
+
+def contextualize_node(state: GraphState) -> dict:
+    """
+    Rewrite the query into a standalone form using conversation history,
+    if any is present. With no history, this makes no Groq call and
+    returns the query unchanged — zero added cost for single-turn use.
+    """
+    original = state["query"]
+    history = state.get("conversation_history") or []
+    resolved = contextualize_query(original, history)
+
+    msg = AgentMessage(
+        sender="contextualizer",
+        receiver="orchestrator",
+        context={"original_query": original, "resolved_query": resolved},
+        confidence=1.0,
+    )
+
+    return {"query": resolved, "trace": [msg]}
 
 
 def planner_node(state: GraphState) -> dict:
@@ -26,11 +46,7 @@ def planner_node(state: GraphState) -> dict:
     available_files = list_source_files()
     msg = planner.plan(state["query"], available_files)
     decision = msg.context["decision"]
-
-    return {
-        "planner": {"decision": decision},
-        "trace": [msg],
-    }
+    return {"planner": {"decision": decision}, "trace": [msg]}
 
 
 def extractor_node(state: GraphState) -> dict:
@@ -38,7 +54,6 @@ def extractor_node(state: GraphState) -> dict:
     decision = state["planner"]["decision"]
     msg = extractor.extract(decision.source_files)
     metadata = msg.context["metadata"]
-
     return {
         "extractor": {"metadata": metadata},
         "trace": [msg],
@@ -51,12 +66,7 @@ def qa_node(state: GraphState) -> dict:
     decision = state["planner"]["decision"]
     msg = qa_agent.answer(state["query"], decision.source_files)
     answer_text = msg.context["answer"]
-
-    return {
-        "qa": {"answer": answer_text},
-        "trace": [msg],
-        "final_answer": answer_text,
-    }
+    return {"qa": {"answer": answer_text}, "trace": [msg], "final_answer": answer_text}
 
 
 def analysis_node(state: GraphState) -> dict:
@@ -64,12 +74,7 @@ def analysis_node(state: GraphState) -> dict:
     decision = state["planner"]["decision"]
     msg = analysis_agent.analyze(decision.source_files)
     answer_text = msg.context["answer"]
-
-    return {
-        "analysis": {"answer": answer_text},
-        "trace": [msg],
-        "final_answer": answer_text,
-    }
+    return {"analysis": {"answer": answer_text}, "trace": [msg], "final_answer": answer_text}
 
 
 def survey_node(state: GraphState) -> dict:
@@ -77,24 +82,14 @@ def survey_node(state: GraphState) -> dict:
     decision = state["planner"]["decision"]
     msg = survey_agent.survey(decision.source_files)
     answer_text = msg.context["answer"]
-
-    return {
-        "survey": {"answer": answer_text},
-        "trace": [msg],
-        "final_answer": answer_text,
-    }
+    return {"survey": {"answer": answer_text}, "trace": [msg], "final_answer": answer_text}
 
 
 def kg_node(state: GraphState) -> dict:
     """Run the Knowledge Graph agent and populate the 'kg' namespace only."""
     msg = graph_agent.query_graph(state["query"])
     answer_text = msg.context["answer"]
-
-    return {
-        "kg": {"answer": answer_text},
-        "trace": [msg],
-        "final_answer": answer_text,
-    }
+    return {"kg": {"answer": answer_text}, "trace": [msg], "final_answer": answer_text}
 
 
 def route_by_intent(state: GraphState) -> str:
@@ -114,11 +109,7 @@ def _format_metadata_answer(metadata_by_file: dict[str, PaperMetadata]) -> str:
     sections = []
     for source_file, meta in metadata_by_file.items():
         authors = ", ".join(meta.authors) if meta.authors else "Not specified"
-        metrics = (
-            ", ".join(meta.evaluation_metrics)
-            if meta.evaluation_metrics
-            else "None listed"
-        )
+        metrics = ", ".join(meta.evaluation_metrics) if meta.evaluation_metrics else "None listed"
         sections.append(
             f"Paper: {source_file}\n"
             f"  Title: {meta.title}\n"

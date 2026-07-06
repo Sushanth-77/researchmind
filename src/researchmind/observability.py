@@ -1,25 +1,39 @@
 """
-Structured logging for every Groq API call.
+Structured logging for every Groq API call, with retry-and-backoff
+resilience for transient failures.
 
 Centralizes all Groq calls behind call_groq() so every call site (qa,
-comparison, metadata_extraction, planner, analysis, survey) is instrumented
-in exactly one place, rather than duplicating timing/logging logic six times.
+comparison, metadata_extraction, planner, analysis, survey, conversation)
+is instrumented and protected in exactly one place.
 
-Not a decorator: retry loops (planner, metadata_extraction) need
-per-attempt logging visibility, which a decorator wrapping the whole
-outer function couldn't see.
+Retries only apply to transient, retryable failures (rate limits,
+connection errors, timeouts, 5xx server errors) — a 4xx client error
+(e.g. a bad API key) is not retried, since retrying a permanently broken
+request just fails the same way, slower.
 """
 
 import json
+import random
 import time
 from dataclasses import dataclass
 
-from groq import Groq
+from groq import (
+    APIConnectionError,
+    APITimeoutError,
+    Groq,
+    InternalServerError,
+    RateLimitError,
+)
 
 from researchmind.config import GROQ_API_KEY, GROQ_MODEL, PROJECT_ROOT
 
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_FILE = LOG_DIR / "groq_calls.jsonl"
+
+MAX_RETRIES = 3
+BASE_BACKOFF_SECONDS = 2.0
+
+RETRYABLE_EXCEPTIONS = (RateLimitError, APIConnectionError, APITimeoutError, InternalServerError)
 
 
 @dataclass
@@ -31,6 +45,7 @@ class GroqCallResult:
     completion_tokens: int
     total_tokens: int
     latency_seconds: float
+    retry_attempts: int
 
 
 def call_groq(
@@ -40,49 +55,66 @@ def call_groq(
     temperature: float = 0.0,
 ) -> GroqCallResult:
     """
-    Call Groq's chat completion endpoint with structured logging of
-    latency and token usage.
-
-    Args:
-        messages: chat messages in Groq's expected format.
-        caller: identifies which module/function made this call (e.g.
-            "qa.answer_question", "planner.plan[attempt=2]") for log analysis.
-        max_tokens: max tokens in the response.
-        temperature: sampling temperature.
-
-    Cost is always logged as $0.0 since this is Groq's free tier, kept as
-    a field for forward-compatibility if a paid tier is ever introduced.
+    Call Groq's chat completion endpoint with structured logging and
+    automatic retry-with-exponential-backoff on transient failures.
 
     Raises:
-        RuntimeError: if the Groq API call fails.
+        RuntimeError: if the call fails after all retries, or fails with
+            a non-retryable error.
     """
     client = Groq(api_key=GROQ_API_KEY)
-    start = time.perf_counter()
+    last_exception: Exception | None = None
 
-    try:
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-    except Exception as exc:
-        _log_entry(caller, None, None, None, time.perf_counter() - start, error=str(exc))
-        raise RuntimeError(f"Groq API call failed: {exc}") from exc
+    for attempt in range(1, MAX_RETRIES + 1):
+        start = time.perf_counter()
+        try:
+            response = client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+        except RETRYABLE_EXCEPTIONS as exc:
+            latency = time.perf_counter() - start
+            last_exception = exc
+            _log_entry(
+                caller, None, None, None, latency,
+                error=f"attempt {attempt}/{MAX_RETRIES}: {exc}",
+                retry_attempts=attempt,
+            )
+            if attempt < MAX_RETRIES:
+                backoff = BASE_BACKOFF_SECONDS * (2 ** (attempt - 1)) + random.uniform(0, 1)
+                time.sleep(backoff)
+                continue
+            raise RuntimeError(
+                f"Groq API call failed after {MAX_RETRIES} attempts: {exc}"
+            ) from exc
+        except Exception as exc:
+            # Non-retryable: fail immediately rather than retrying a request
+            # that will fail the same way every time.
+            latency = time.perf_counter() - start
+            _log_entry(caller, None, None, None, latency, error=str(exc), retry_attempts=attempt)
+            raise RuntimeError(f"Groq API call failed: {exc}") from exc
+        else:
+            latency = time.perf_counter() - start
+            usage = response.usage
+            content = response.choices[0].message.content
 
-    latency = time.perf_counter() - start
-    usage = response.usage
-    content = response.choices[0].message.content
+            _log_entry(
+                caller, usage.prompt_tokens, usage.completion_tokens, usage.total_tokens,
+                latency, retry_attempts=attempt,
+            )
 
-    _log_entry(caller, usage.prompt_tokens, usage.completion_tokens, usage.total_tokens, latency)
+            return GroqCallResult(
+                content=content,
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+                latency_seconds=latency,
+                retry_attempts=attempt,
+            )
 
-    return GroqCallResult(
-        content=content,
-        prompt_tokens=usage.prompt_tokens,
-        completion_tokens=usage.completion_tokens,
-        total_tokens=usage.total_tokens,
-        latency_seconds=latency,
-    )
+    raise RuntimeError(f"Groq API call failed: {last_exception}")
 
 
 def _log_entry(
@@ -91,9 +123,10 @@ def _log_entry(
     completion_tokens: int | None,
     total_tokens: int | None,
     latency_seconds: float,
+    retry_attempts: int = 1,
     error: str | None = None,
 ) -> None:
-    """Append one structured JSON line per Groq call to the log file."""
+    """Append one structured JSON line per Groq call attempt to the log file."""
     LOG_DIR.mkdir(parents=True, exist_ok=True)
 
     entry = {
@@ -104,6 +137,7 @@ def _log_entry(
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
         "latency_seconds": round(latency_seconds, 3),
+        "retry_attempts": retry_attempts,
         "cost_usd": 0.0,
         "error": error,
     }

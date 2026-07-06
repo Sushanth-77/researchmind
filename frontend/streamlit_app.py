@@ -1,16 +1,9 @@
 """
 ResearchMind Streamlit frontend.
 
-Talks to the FastAPI backend (Phase 8) over HTTP — this file has no
-direct dependency on the LangGraph orchestration, Groq, or Chroma.
-Requires the backend to be running separately (see Phase 9 run commands).
-
-Three views:
-- Papers: upload PDFs (background-ingested) and see what's in the store.
-- Ask a Question: chat-style interface hitting /query for single-paper
-  QA, metadata extraction, or auto-detected analysis/survey intents.
-- Compare Papers: explicit two-paper selection to avoid relying on the
-  Planner correctly inferring which papers to compare from free text.
+Talks to the FastAPI backend over HTTP. Chat history is kept in
+st.session_state and sent to the backend on every turn so follow-up
+questions can be resolved against prior context.
 """
 
 import time
@@ -33,7 +26,6 @@ if "chat_history" not in st.session_state:
 
 
 def _show_api_error(exc: APIError) -> None:
-    """Render an APIError consistently across all views."""
     if exc.status_code == 0:
         st.error(f"⚠️ {exc.detail}")
     else:
@@ -53,9 +45,6 @@ if not check_health():
 
 tab_papers, tab_chat, tab_compare = st.tabs(["📄 Papers", "💬 Ask a Question", "🔍 Compare Papers"])
 
-# ----------------------------------------------------------------------
-# Papers tab: upload + list
-# ----------------------------------------------------------------------
 with tab_papers:
     st.subheader("Upload a paper")
     uploaded_file = st.file_uploader("Choose a PDF", type=["pdf"])
@@ -73,10 +62,7 @@ with tab_papers:
                     status = status_response["status"]
 
             if status == "completed":
-                st.success(
-                    f"✅ Ingested {uploaded_file.name} "
-                    f"({status_response['chunks_created']} chunks created)."
-                )
+                st.success(f"✅ Ingested {uploaded_file.name} ({status_response['chunks_created']} chunks created).")
             else:
                 st.error(f"❌ Ingestion failed: {status_response['error']}")
         except APIError as exc:
@@ -98,15 +84,17 @@ with tab_papers:
     except APIError as exc:
         _show_api_error(exc)
 
-# ----------------------------------------------------------------------
-# Chat tab: free-form Q&A, metadata extraction, analysis, survey
-# ----------------------------------------------------------------------
 with tab_chat:
     st.subheader("Ask anything about your ingested papers")
     st.caption(
-        "Routes automatically to single-paper Q&A, metadata extraction, "
-        "cross-paper analysis, or survey generation based on your question."
+        "Routes automatically based on your question. Follow-ups like "
+        "'what about the polite one?' use the conversation so far to "
+        "figure out what you mean."
     )
+
+    if st.button("🗑️ Clear conversation"):
+        st.session_state.chat_history = []
+        st.rerun()
 
     for message in st.session_state.chat_history:
         with st.chat_message(message["role"]):
@@ -117,6 +105,12 @@ with tab_chat:
     user_query = st.chat_input("Ask a question...")
 
     if user_query:
+        # History sent to the backend excludes the current message — it's
+        # only the prior turns that provide context for resolving this one.
+        history_payload = [
+            {"role": m["role"], "content": m["content"]} for m in st.session_state.chat_history
+        ]
+
         st.session_state.chat_history.append({"role": "user", "content": user_query})
         with st.chat_message("user"):
             st.markdown(user_query)
@@ -124,7 +118,7 @@ with tab_chat:
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 try:
-                    result = run_query(user_query)
+                    result = run_query(user_query, history_payload)
                     st.markdown(result["answer"])
                     st.caption(f"Intent: `{result['intent']}` | Sources: {result['source_files']}")
                     st.session_state.chat_history.append({
@@ -135,20 +129,13 @@ with tab_chat:
                     })
                 except APIError as exc:
                     _show_api_error(exc)
-                    st.session_state.chat_history.append({
-                        "role": "assistant",
-                        "content": f"⚠️ Error: {exc.detail}",
-                    })
+                    st.session_state.chat_history.append({"role": "assistant", "content": f"⚠️ Error: {exc.detail}"})
 
-# ----------------------------------------------------------------------
-# Compare tab: explicit two-paper selection
-# ----------------------------------------------------------------------
 with tab_compare:
     st.subheader("Compare two papers")
     st.caption(
         "Explicitly naming both papers here is more reliable than typing "
-        "a free-form comparison request, since it removes any ambiguity "
-        "in which papers the Planner should select."
+        "a free-form comparison request."
     )
 
     try:
@@ -160,11 +147,7 @@ with tab_compare:
     if len(available_papers) < 2:
         st.info("Ingest at least 2 papers (in the Papers tab) to use comparison.")
     else:
-        selected = st.multiselect(
-            "Select exactly 2 papers to compare",
-            options=available_papers,
-            max_selections=2,
-        )
+        selected = st.multiselect("Select exactly 2 papers to compare", options=available_papers, max_selections=2)
         aspect = st.text_input("What aspect should be compared?", value="methodologies")
 
         if st.button("Compare", disabled=len(selected) != 2):

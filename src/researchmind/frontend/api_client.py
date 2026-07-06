@@ -1,18 +1,11 @@
 """
 Thin HTTP client wrapping the ResearchMind FastAPI backend.
-
-Isolates all requests-library and HTTP-status-code handling behind typed
-functions so streamlit_app.py never touches raw responses directly —
-same isolation principle as graph.py hiding LangGraph specifics from its
-callers. Every failure mode (backend down, 400, 422, 502) is normalized
-into a single APIError type so the UI has one consistent way to display
-any error, regardless of cause.
 """
 
 import requests
 
 API_BASE_URL = "http://127.0.0.1:8000"
-REQUEST_TIMEOUT_SECONDS = 120  # Groq calls under the hood can be slow; see Phase 7 latency logs
+REQUEST_TIMEOUT_SECONDS = 120
 
 
 class APIError(Exception):
@@ -26,25 +19,13 @@ class APIError(Exception):
 
 
 def _request(method: str, path: str, **kwargs) -> dict:
-    """
-    Shared request wrapper: makes the call, normalizes connection failures
-    and non-2xx responses into APIError, returns parsed JSON on success.
-    """
     url = f"{API_BASE_URL}{path}"
     try:
         response = requests.request(method, url, timeout=REQUEST_TIMEOUT_SECONDS, **kwargs)
     except requests.exceptions.ConnectionError:
-        raise APIError(
-            status_code=0,
-            error="connection_error",
-            detail=f"Could not connect to the backend at {API_BASE_URL}. Is uvicorn running?",
-        )
+        raise APIError(0, "connection_error", f"Could not connect to the backend at {API_BASE_URL}. Is uvicorn running?")
     except requests.exceptions.Timeout:
-        raise APIError(
-            status_code=0,
-            error="timeout",
-            detail=f"Request to {path} timed out after {REQUEST_TIMEOUT_SECONDS}s.",
-        )
+        raise APIError(0, "timeout", f"Request to {path} timed out after {REQUEST_TIMEOUT_SECONDS}s.")
 
     if response.ok:
         return response.json()
@@ -61,7 +42,6 @@ def _request(method: str, path: str, **kwargs) -> dict:
 
 
 def check_health() -> bool:
-    """Return True if the backend is reachable and healthy."""
     try:
         _request("GET", "/health")
         return True
@@ -70,22 +50,25 @@ def check_health() -> bool:
 
 
 def list_papers() -> list[str]:
-    """Fetch the list of papers currently stored in the vector store."""
     data = _request("GET", "/papers")
     return data["papers"]
 
 
 def ingest_paper(filename: str, file_bytes: bytes) -> dict:
-    """Upload a PDF for background ingestion. Returns {"task_id", "filename", "status"}."""
     files = {"file": (filename, file_bytes, "application/pdf")}
     return _request("POST", "/papers/ingest", files=files)
 
 
 def get_ingest_status(task_id: str) -> dict:
-    """Poll ingestion status. Returns {"status", "chunks_created", "error", ...}."""
     return _request("GET", f"/papers/ingest/{task_id}")
 
 
-def run_query(query: str) -> dict:
-    """Run a query through the orchestration graph. Returns {"intent", "source_files", "answer", "trace"}."""
-    return _request("POST", "/query", json={"query": query})
+def run_query(query: str, conversation_history: list[dict] | None = None) -> dict:
+    """
+    Run a query through the orchestration graph.
+
+    conversation_history: prior turns as [{"role": "user"|"assistant",
+    "content": str}, ...], used to resolve follow-up questions.
+    """
+    payload = {"query": query, "conversation_history": conversation_history or []}
+    return _request("POST", "/query", json=payload)
