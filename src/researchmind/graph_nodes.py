@@ -17,6 +17,7 @@ from researchmind.agents import (
 from researchmind.agents.messages import AgentMessage
 from researchmind.conversation import contextualize_query
 from researchmind.graph_state import GraphState
+from researchmind.retrieval import retrieve
 from researchmind.schemas import PaperMetadata
 from researchmind.vectorstore import list_source_files
 
@@ -41,10 +42,53 @@ def contextualize_node(state: GraphState) -> dict:
     return {"query": resolved, "trace": [msg]}
 
 
+def _rank_files_by_relevance(query: str, available_files: list[str], pool_size: int = 20) -> list[str]:
+    """
+    Order available_files by relevance to the query using hybrid retrieval
+    over the whole collection, so the Planner gets real content signal
+    instead of guessing blindly from filenames alone.
+
+    This was added after a real regression: with only 2 ingested papers,
+    the Planner's blind filename-only guessing happened to succeed most
+    of the time by chance. Once the corpus grew (Phase 11 testing added
+    10 more papers), that same blind guessing dropped to roughly 1-in-12
+    odds and started routing queries to the wrong paper. Files with no
+    strong retrieval match are appended afterward, in their original
+    order, so the Planner still knows about every ingested paper even
+    when none scored highly for this particular query.
+    """
+    if not available_files:
+        return available_files
+
+    try:
+        chunks = retrieve(query, top_k=min(pool_size, len(available_files) * 3))
+    except ValueError:
+        # Empty collection or empty query — let planner.plan surface its own error.
+        return available_files
+
+    ranked: list[str] = []
+    seen: set[str] = set()
+    for chunk in chunks:
+        if chunk.source_file in available_files and chunk.source_file not in seen:
+            ranked.append(chunk.source_file)
+            seen.add(chunk.source_file)
+
+    remaining = [f for f in available_files if f not in seen]
+    return ranked + remaining
+
+
 def planner_node(state: GraphState) -> dict:
-    """Run the Planner agent and populate the 'planner' namespace only."""
+    """
+    Run the Planner agent and populate the 'planner' namespace only.
+
+    available_files is now ordered by relevance to the query (see
+    _rank_files_by_relevance) rather than the raw alphabetical listing,
+    giving the Planner actual content-based signal for single-paper
+    disambiguation instead of guessing from filenames alone.
+    """
     available_files = list_source_files()
-    msg = planner.plan(state["query"], available_files)
+    ranked_files = _rank_files_by_relevance(state["query"], available_files)
+    msg = planner.plan(state["query"], ranked_files)
     decision = msg.context["decision"]
     return {"planner": {"decision": decision}, "trace": [msg]}
 

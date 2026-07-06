@@ -20,6 +20,12 @@ SYSTEM_PROMPT = """You are a routing planner for a research paper analysis syste
 Given a user query and a list of available papers, decide which capability should \
 handle it and which paper(s) are relevant.
 
+The available papers list is ordered by likely relevance to the query (most relevant \
+first, based on retrieval over each paper's actual content) — strongly prefer files \
+earlier in the list when the query doesn't explicitly name a paper. Do not pick a \
+file based on assumptions about what its filename or arXiv ID might mean; rely on \
+the given ordering instead.
+
 Intents:
 - "single_paper_qa": a factual question answerable from one specific paper, or from \
 whichever paper seems most relevant if none is named.
@@ -42,11 +48,11 @@ exactly these keys:
 - "reasoning": one sentence explaining the choice
 
 For "single_paper_qa", include exactly one filename unless the query is genuinely \
-ambiguous across papers, in which case include the most likely one. For "comparison", \
-include two or more filenames. For "analysis", "survey", and "knowledge_graph", include \
-specific filenames only if the user names them; otherwise leave source_files as an \
-empty array to signal "use all ingested papers." Never invent a filename not in the \
-available list."""
+ambiguous across papers, in which case include the most likely one (the first \
+relevant match in the ordered list). For "comparison", include two or more filenames. \
+For "analysis", "survey", and "knowledge_graph", include specific filenames only if \
+the user names them; otherwise leave source_files as an empty array to signal "use \
+all ingested papers." Never invent a filename not in the available list."""
 
 
 def _strip_code_fences(text: str) -> str:
@@ -72,11 +78,11 @@ def plan(query: str, available_files: list[str]) -> AgentMessage:
     if not available_files:
         raise ValueError("No papers available to route queries to. Ingest a paper first.")
 
-    files_block = "\n".join(f"- {f}" for f in available_files)
+    files_block = "\n".join(f"{i+1}. {f}" for i, f in enumerate(available_files))
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"Available papers:\n{files_block}\n\nUser query: {query}"},
+        {"role": "user", "content": f"Available papers (ordered by relevance):\n{files_block}\n\nUser query: {query}"},
     ]
 
     last_error = ""
