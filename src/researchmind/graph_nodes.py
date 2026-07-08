@@ -19,6 +19,7 @@ from researchmind.conversation import contextualize_query
 from researchmind.graph_state import GraphState
 from researchmind.retrieval import retrieve
 from researchmind.schemas import PaperMetadata
+from researchmind.title_cache import get_titles_for
 from researchmind.vectorstore import list_source_files
 
 
@@ -45,17 +46,9 @@ def contextualize_node(state: GraphState) -> dict:
 def _rank_files_by_relevance(query: str, available_files: list[str], pool_size: int = 20) -> list[str]:
     """
     Order available_files by relevance to the query using hybrid retrieval
-    over the whole collection, so the Planner gets real content signal
-    instead of guessing blindly from filenames alone.
-
-    This was added after a real regression: with only 2 ingested papers,
-    the Planner's blind filename-only guessing happened to succeed most
-    of the time by chance. Once the corpus grew (Phase 11 testing added
-    10 more papers), that same blind guessing dropped to roughly 1-in-12
-    odds and started routing queries to the wrong paper. Files with no
-    strong retrieval match are appended afterward, in their original
-    order, so the Planner still knows about every ingested paper even
-    when none scored highly for this particular query.
+    over the whole collection. Used as a tiebreaker signal when the query
+    doesn't explicitly name a paper — see planner.py's SYSTEM_PROMPT for
+    how this is weighed against explicit title matches.
     """
     if not available_files:
         return available_files
@@ -63,7 +56,6 @@ def _rank_files_by_relevance(query: str, available_files: list[str], pool_size: 
     try:
         chunks = retrieve(query, top_k=min(pool_size, len(available_files) * 3))
     except ValueError:
-        # Empty collection or empty query — let planner.plan surface its own error.
         return available_files
 
     ranked: list[str] = []
@@ -81,14 +73,18 @@ def planner_node(state: GraphState) -> dict:
     """
     Run the Planner agent and populate the 'planner' namespace only.
 
-    available_files is now ordered by relevance to the query (see
-    _rank_files_by_relevance) rather than the raw alphabetical listing,
-    giving the Planner actual content-based signal for single-paper
-    disambiguation instead of guessing from filenames alone.
+    Provides the Planner with both a relevance-ordered file list AND each
+    file's title, so it can correctly resolve explicit descriptive
+    references ("the Kantian ethics paper") to the right file even when
+    that file isn't top-ranked by content relevance for this query — the
+    fix for a real routing bug found in testing, where "GPU" and "trained"
+    in a query about the Kantian ethics paper caused content-relevance
+    ranking to favor an unrelated ML paper instead.
     """
     available_files = list_source_files()
     ranked_files = _rank_files_by_relevance(state["query"], available_files)
-    msg = planner.plan(state["query"], ranked_files)
+    file_titles = get_titles_for(ranked_files)
+    msg = planner.plan(state["query"], ranked_files, file_titles=file_titles)
     decision = msg.context["decision"]
     return {"planner": {"decision": decision}, "trace": [msg]}
 

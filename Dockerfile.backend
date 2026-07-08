@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml ./
+COPY src ./src
+
+# Install CPU-only torch BEFORE the editable install, so pip's resolver
+# sees it already satisfied and skips pulling ~2GB of unused CUDA wheels
+# that sentence-transformers would otherwise drag in on a GPU-less container.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+RUN pip install --no-cache-dir -e .
+
+EXPOSE 8000
+
+CMD ["uvicorn", "researchmind.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,27 @@
+[
+  {
+    "name": "politeness_accuracy_very_rude",
+    "query": "What accuracy did the study find for very rude prompts?",
+    "expect_contains": ["84.8"]
+  },
+  {
+    "name": "politeness_accuracy_very_polite",
+    "query": "What accuracy did the study find for very polite prompts?",
+    "expect_contains": ["80.8"]
+  },
+  {
+    "name": "kantian_ethics_methodology",
+    "query": "What methodology does the Kantian ethics paper use?",
+    "expect_contains": ["Dyadic Deontic Logic"]
+  },
+  {
+    "name": "shared_authors_cot_cluster",
+    "query": "Which authors appear on more than one paper?",
+    "expect_contains": ["Jason Wei"]
+  },
+  {
+    "name": "unanswerable_refusal",
+    "query": "What was the exact GPU model used to train the base model in the Kantian ethics paper?",
+    "expect_contains": ["cannot answer"]
+  }
+]

@@ -17,20 +17,33 @@ from researchmind.schemas import PlannerDecision
 MAX_ATTEMPTS = 3
 
 SYSTEM_PROMPT = """You are a routing planner for a research paper analysis system. \
-Given a user query and a list of available papers, decide which capability should \
-handle it and which paper(s) are relevant.
+Given a user query and a list of available papers (each shown as filename — title, \
+ordered by relevance to the query), decide which capability should handle it and \
+which paper(s) are relevant.
 
-The available papers list is ordered by likely relevance to the query (most relevant \
-first, based on retrieval over each paper's actual content) — strongly prefer files \
-earlier in the list when the query doesn't explicitly name a paper. Do not pick a \
-file based on assumptions about what its filename or arXiv ID might mean; rely on \
-the given ordering instead.
+Two signals are given for each paper: its title, and its position in the \
+relevance-ordered list. Resolve them in this priority order:
+1. If the query explicitly names or describes a specific paper (by title, topic, or \
+subject matter — e.g. "the Kantian ethics paper", "the RAG paper"), match it to \
+whichever paper's TITLE corresponds, even if that paper is not first in the list. \
+The title is the authoritative signal for an explicit reference.
+2. Only when the query does NOT name or describe a specific paper, use the \
+relevance-ordering as a tiebreaker and prefer papers earlier in the list.
 
 Intents:
-- "single_paper_qa": a factual question answerable from one specific paper, or from \
-whichever paper seems most relevant if none is named.
-- "metadata_extraction": the user wants structured facts about a paper (title, \
-authors, methodology, dataset, evaluation metrics) rather than a specific answer.
+- "single_paper_qa": ANY specific factual question about a paper's content — \
+including numbers, names, results, definitions, methods, hardware, sample sizes, \
+dates, or anything else stated (or not stated) in the paper — that is not one of the \
+exact five fields listed under "metadata_extraction" below. This is the default \
+intent for factual questions; use it unless the query clearly matches one of the \
+other intents.
+- "metadata_extraction": the user explicitly wants a structured summary covering \
+SPECIFICALLY these five fields together: title, authors, methodology, dataset, \
+evaluation metrics — e.g. "give me the metadata for X" or "summarize the title, \
+authors, and methodology of X". A question asking for ONE specific fact that happens \
+to resemble one of these fields (e.g. "what dataset size did they use") is still \
+"single_paper_qa", not this intent — reserve "metadata_extraction" for requests that \
+clearly want the structured multi-field summary as a whole.
 - "comparison": the user wants two or more specific papers compared or contrasted.
 - "analysis": the user wants cross-paper trends, patterns, or research-gap \
 identification across the ingested papers.
@@ -44,15 +57,15 @@ Respond with ONLY a JSON object, no preamble, no markdown fences. The JSON must 
 exactly these keys:
 - "intent": one of "single_paper_qa", "metadata_extraction", "comparison", \
 "analysis", "survey", "knowledge_graph"
-- "source_files": array of filenames chosen from the available list (exact matches only)
+- "source_files": array of FILENAMES ONLY (not titles) chosen from the available \
+list (exact filename matches only)
 - "reasoning": one sentence explaining the choice
 
 For "single_paper_qa", include exactly one filename unless the query is genuinely \
-ambiguous across papers, in which case include the most likely one (the first \
-relevant match in the ordered list). For "comparison", include two or more filenames. \
-For "analysis", "survey", and "knowledge_graph", include specific filenames only if \
-the user names them; otherwise leave source_files as an empty array to signal "use \
-all ingested papers." Never invent a filename not in the available list."""
+ambiguous across papers. For "comparison", include two or more filenames. For \
+"analysis", "survey", and "knowledge_graph", include specific filenames only if the \
+user names them; otherwise leave source_files as an empty array to signal "use all \
+ingested papers." Never invent a filename not in the available list."""
 
 
 def _strip_code_fences(text: str) -> str:
@@ -66,7 +79,7 @@ def _strip_code_fences(text: str) -> str:
     return text.strip()
 
 
-def plan(query: str, available_files: list[str]) -> AgentMessage:
+def plan(query: str, available_files: list[str], file_titles: dict[str, str] | None = None) -> AgentMessage:
     """
     Produce a routing decision for a query.
 
@@ -78,7 +91,10 @@ def plan(query: str, available_files: list[str]) -> AgentMessage:
     if not available_files:
         raise ValueError("No papers available to route queries to. Ingest a paper first.")
 
-    files_block = "\n".join(f"{i+1}. {f}" for i, f in enumerate(available_files))
+    file_titles = file_titles or {}
+    files_block = "\n".join(
+        f"{i+1}. {f} — {file_titles.get(f, f)}" for i, f in enumerate(available_files)
+    )
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},

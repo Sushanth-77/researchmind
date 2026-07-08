@@ -2,9 +2,15 @@
 Thin HTTP client wrapping the ResearchMind FastAPI backend.
 """
 
+import os
+
 import requests
 
-API_BASE_URL = "http://127.0.0.1:8000"
+# Configurable so Docker Compose can point the frontend container at the
+# backend container's hostname ("http://backend:8000") instead of localhost.
+# Defaults to localhost for local (non-Docker) development, unchanged from
+# every prior phase.
+API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 REQUEST_TIMEOUT_SECONDS = 120
 
 
@@ -64,11 +70,5 @@ def get_ingest_status(task_id: str) -> dict:
 
 
 def run_query(query: str, conversation_history: list[dict] | None = None) -> dict:
-    """
-    Run a query through the orchestration graph.
-
-    conversation_history: prior turns as [{"role": "user"|"assistant",
-    "content": str}, ...], used to resolve follow-up questions.
-    """
     payload = {"query": query, "conversation_history": conversation_history or []}
     return _request("POST", "/query", json=payload)
