@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml ./
 COPY src ./src
+COPY scripts ./scripts
 
 # Install CPU-only torch BEFORE the editable install, so pip's resolver
 # sees it already satisfied and skips pulling ~2GB of unused CUDA wheels
