@@ -105,8 +105,6 @@ with tab_chat:
     user_query = st.chat_input("Ask a question...")
 
     if user_query:
-        # History sent to the backend excludes the current message — it's
-        # only the prior turns that provide context for resolving this one.
         history_payload = [
             {"role": m["role"], "content": m["content"]} for m in st.session_state.chat_history
         ]
@@ -132,10 +130,11 @@ with tab_chat:
                     st.session_state.chat_history.append({"role": "assistant", "content": f"⚠️ Error: {exc.detail}"})
 
 with tab_compare:
-    st.subheader("Compare two papers")
+    st.subheader("Compare papers")
     st.caption(
-        "Explicitly naming both papers here is more reliable than typing "
-        "a free-form comparison request."
+        "Select two or more papers to compare. Explicitly naming them here is "
+        "more reliable than typing a free-form comparison request, since it "
+        "removes any ambiguity in which papers should be included."
     )
 
     try:
@@ -147,15 +146,27 @@ with tab_compare:
     if len(available_papers) < 2:
         st.info("Ingest at least 2 papers (in the Papers tab) to use comparison.")
     else:
-        selected = st.multiselect("Select exactly 2 papers to compare", options=available_papers, max_selections=2)
+        selected = st.multiselect(
+            f"Select 2 to {len(available_papers)} papers to compare",
+            options=available_papers,
+            max_selections=len(available_papers),
+        )
         aspect = st.text_input("What aspect should be compared?", value="methodologies")
 
-        if st.button("Compare", disabled=len(selected) != 2):
-            comparison_query = f"Compare the {aspect} of {selected[0]} and {selected[1]}"
-            with st.spinner("Comparing..."):
+        if st.button("Compare", disabled=len(selected) < 2):
+            papers_list = ", ".join(selected[:-1]) + f", and {selected[-1]}" if len(selected) > 2 else " and ".join(selected)
+            comparison_query = f"Compare the {aspect} of {papers_list}"
+            with st.spinner(f"Comparing {len(selected)} papers..."):
                 try:
                     result = run_query(comparison_query)
                     st.markdown(result["answer"])
                     st.caption(f"Intent: `{result['intent']}` | Sources: {result['source_files']}")
+                    if len(result["source_files"]) != len(selected):
+                        st.warning(
+                            f"⚠️ You selected {len(selected)} papers, but the response only used "
+                            f"{len(result['source_files'])}. The Planner may not have picked up all "
+                            f"of them from the phrasing — try naming fewer papers per comparison if "
+                            f"this happens often."
+                        )
                 except APIError as exc:
                     _show_api_error(exc)
