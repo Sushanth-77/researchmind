@@ -8,8 +8,7 @@ orchestration).
 Ingest PDFs, ask grounded questions, extract structured metadata, compare
 papers, get cross-paper analysis and literature-review summaries, query a
 knowledge graph of papers/authors/methods, and drive it all from a
-Streamlit UI, a FastAPI backend, or an MCP server usable directly from
-Claude Desktop.
+Streamlit UI, a FastAPI backend, or an MCP server.
 
 ## Features
 
@@ -37,8 +36,11 @@ Claude Desktop.
   full REST API
 - **Streamlit frontend** — paper upload, chat, and multi-paper comparison
   views
-- **MCP server** — exposes arXiv search/ingest and paper Q&A as tools
-  usable directly from Claude Desktop
+- **MCP server** — exposes arXiv search/ingest and paper Q&A as MCP
+  tools/resources; verified against a standalone MCP client, and should
+  work with any MCP-compatible host (e.g. Claude Desktop) via the config
+  below, though that specific integration hasn't been independently
+  tested end-to-end
 - **Docker Compose** — full stack (backend, frontend, Neo4j) containerized
 - **Testing** — pytest unit suite (corpus-independent) + regression eval
   harness (corpus-aware, built from real verified query/answer pairs)
@@ -50,7 +52,8 @@ Neo4j (knowledge graph) ─────────────┘         │
 ▼
 FastAPI backend ←→ Streamlit frontend
 │
-MCP server (Claude Desktop)
+MCP server (stdio; usable from Claude Desktop
+or any MCP-compatible host)
 
 ## Stack
 
@@ -105,6 +108,9 @@ uvicorn researchmind.api.main:app --reload --port 8000
 streamlit run frontend/streamlit_app.py
 ```
 
+Note: don't run a local `streamlit run` / `uvicorn` at the same time as
+the Docker stack below — both default to the same ports and will conflict.
+
 ### Docker (full stack)
 
 ```powershell
@@ -128,9 +134,13 @@ pytest tests/ -v
 python scripts/run_eval.py
 ```
 
-### MCP server (Claude Desktop integration)
+### MCP server
 
-Add to `%APPDATA%\Claude\claude_desktop_config.json`:
+Tested against a standalone MCP client (`scripts/test_mcp_client.py`) —
+lists tools, searches arXiv, and reads the ingested-papers resource over
+stdio. To try it with Claude Desktop specifically, add to
+`%APPDATA%\Claude\claude_desktop_config.json` (untested with the real
+Claude Desktop app; adjust the path to your own):
 ```json
 {
   "mcpServers": {
@@ -145,28 +155,30 @@ Add to `%APPDATA%\Claude\claude_desktop_config.json`:
 ## Project Structure
 researchmind/
 ├── src/researchmind/
-│   ├── agents/              # Planner, Extractor, QA, Analysis, Survey, Graph agents
-│   ├── api/                 # FastAPI backend
-│   ├── frontend/            # Streamlit API client
-│   ├── ingestion.py         # PDF parsing & chunking
-│   ├── embeddings.py        # Local embedding model
-│   ├── vectorstore.py       # Chroma wrapper
-│   ├── retrieval.py         # Hybrid BM25 + embedding retrieval
-│   ├── qa.py                # Grounded generation
-│   ├── comparison.py        # Multi-paper comparison
+│   ├── agents/               # Planner, Extractor, QA, Analysis, Survey, Graph agents
+│   ├── api/                  # FastAPI backend
+│   ├── frontend/             # Streamlit API client
+│   ├── ingestion.py          # PDF parsing & chunking
+│   ├── embeddings.py         # Local embedding model
+│   ├── vectorstore.py        # Chroma wrapper
+│   ├── retrieval.py          # Hybrid BM25 + embedding retrieval
+│   ├── qa.py                 # Grounded generation
+│   ├── comparison.py         # Multi-paper comparison
 │   ├── metadata_extraction.py
-│   ├── analysis.py          # Cross-paper trend/gap detection
-│   ├── survey.py            # Literature review synthesis
-│   ├── knowledge_graph.py   # Neo4j integration
-│   ├── conversation.py      # Multi-turn query resolution
-│   ├── observability.py     # Groq call logging + retry/backoff
-│   ├── graph.py             # LangGraph state machine
+│   ├── analysis.py           # Cross-paper trend/gap detection
+│   ├── survey.py             # Literature review synthesis
+│   ├── knowledge_graph.py    # Neo4j integration
+│   ├── conversation.py       # Multi-turn query resolution
+│   ├── observability.py      # Groq call logging + retry/backoff
+│   ├── title_cache.py        # Paper title lookup, used for Planner routing
+│   ├── schemas.py            # Core Pydantic schemas (PaperMetadata, PlannerDecision)
+│   ├── graph.py               # LangGraph state machine
 │   ├── graph_nodes.py / graph_state.py
-│   ├── mcp_server.py        # MCP tool/resource exposure
-│   └── arxiv_client.py      # arXiv search/download
+│   ├── mcp_server.py         # MCP tool/resource exposure
+│   └── arxiv_client.py       # arXiv search/download
 ├── frontend/streamlit_app.py
-├── tests/                   # pytest unit suite
-├── eval/test_cases.json     # regression eval cases
-├── scripts/                 # CLI entry points for every capability
+├── tests/                    # pytest unit suite
+├── eval/test_cases.json      # regression eval cases
+├── scripts/                  # CLI entry points for every capability
 ├── Dockerfile.backend / Dockerfile.frontend / docker-compose.yml
 └── DEPLOYMENT.md
