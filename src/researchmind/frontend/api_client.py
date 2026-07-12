@@ -3,8 +3,20 @@ Thin HTTP client wrapping the ResearchMind FastAPI backend.
 """
 
 import os
+from pathlib import Path
 
 import requests
+from dotenv import load_dotenv
+
+# Load .env directly here rather than relying on it being pre-set in the
+# shell — api_client.py deliberately doesn't import researchmind.config
+# (to keep the frontend decoupled from backend-only settings), so without
+# this, API_KEY would only be picked up if the launching shell happened
+# to have it exported, which is fragile and easy to silently miss (as
+# happened in testing: Streamlit passed /health but 401'd on every
+# authenticated endpoint because the key never reached its environment).
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+load_dotenv(_PROJECT_ROOT / ".env")
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 API_KEY = os.getenv("API_KEY")  # optional; sent as X-API-Key if set
