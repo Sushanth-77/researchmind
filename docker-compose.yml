@@ -43,6 +43,7 @@ services:
       dockerfile: Dockerfile.frontend
     environment:
       API_BASE_URL: http://backend:8000
+      API_KEY: ${API_KEY}
     ports:
       - "8501:8501"
     depends_on:

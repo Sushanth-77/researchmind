@@ -6,11 +6,8 @@ import os
 
 import requests
 
-# Configurable so Docker Compose can point the frontend container at the
-# backend container's hostname ("http://backend:8000") instead of localhost.
-# Defaults to localhost for local (non-Docker) development, unchanged from
-# every prior phase.
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
+API_KEY = os.getenv("API_KEY")  # optional; sent as X-API-Key if set
 REQUEST_TIMEOUT_SECONDS = 120
 
 
@@ -26,8 +23,12 @@ class APIError(Exception):
 
 def _request(method: str, path: str, **kwargs) -> dict:
     url = f"{API_BASE_URL}{path}"
+    headers = kwargs.pop("headers", {})
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
+
     try:
-        response = requests.request(method, url, timeout=REQUEST_TIMEOUT_SECONDS, **kwargs)
+        response = requests.request(method, url, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS, **kwargs)
     except requests.exceptions.ConnectionError:
         raise APIError(0, "connection_error", f"Could not connect to the backend at {API_BASE_URL}. Is uvicorn running?")
     except requests.exceptions.Timeout:

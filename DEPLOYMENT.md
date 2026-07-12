@@ -25,26 +25,23 @@ Neo4j data volume and start fully fresh next time).
 
 ## Known limitations before any real/public deployment
 
-These are honest gaps, not oversights — each was an explicit scope choice
-earlier in the build, made for good reasons at the time, but worth revisiting
-before this runs anywhere beyond your own machine:
-
-- **In-memory ingestion task store** (Phase 8): task status lives in a
-  Python dict, lost on restart and invisible across multiple backend
-  instances. Fine for one person, one process. A real multi-user or
-  multi-instance deployment needs this backed by Redis or a database table.
-- **No authentication on the FastAPI backend**: anyone who can reach port
-  8000 can ingest papers and run queries. Add an API key or proper auth
-  before exposing this beyond your own machine/network.
-- **Groq free-tier rate limits**: the retry/backoff logic added this session
-  smooths over transient limits but doesn't remove the underlying ceiling.
-  Real multi-user traffic would need a paid tier or a fallback provider.
+- **No auth by default**: if `API_KEY` is left unset in `.env`, the
+  backend runs open — fine for local-only use, but set it before
+  exposing the backend beyond your own machine (see `.env.example`).
+- **SQLite state is single-writer**: ingestion task status and cached
+  paper titles now persist across restarts (fixed — previously
+  in-memory), but SQLite isn't built for concurrent multi-instance
+  writes. Fine for one person, one backend process. A real multi-instance
+  deployment would want this backed by a proper database instead.
+- **Groq free-tier rate limits**: the retry/backoff logic smooths over
+  transient limits but doesn't remove the underlying ceiling. Real
+  multi-user traffic would need a paid tier or a fallback provider.
 - **Chroma is an embedded, single-process file store**: great for one
   instance, not built for concurrent multi-instance writes. A scaled
   deployment would want a hosted vector database instead.
-- **Neo4j Community Edition has no clustering/HA**: fine for personal use;
-  a real deployment might use Neo4j Aura's free managed tier instead of
-  self-hosting.
+- **Neo4j Community Edition has no clustering/HA**: fine for personal
+  use; a real deployment might use Neo4j Aura's free managed tier
+  instead of self-hosting.
 
 ## If you want to actually host this somewhere cheaply
 

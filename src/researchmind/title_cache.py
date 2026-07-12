@@ -1,20 +1,17 @@
 """
-In-memory cache of paper titles, keyed by source_file.
+Persistent cache of paper titles, keyed by source_file, backed by the
+shared SQLite kv_store.
 
-Lets the Planner see human-readable titles ("Automated Kantian Ethics: A
-Faithful Implementation") alongside filenames, so it can resolve explicit
-descriptive references ("the Kantian ethics paper") to the correct file —
-something a bare filename list or pure content-relevance ranking cannot do.
-
-Same in-memory, single-process limitation as api/task_store.py: cache is
-lost on restart, rebuilt lazily (once per paper, ever) on first use.
-Acceptable at this scale; a real multi-instance deployment would want
-this persisted (e.g. as Chroma collection metadata) instead.
+Previously an in-memory dict, rebuilt (one Groq call per paper) on every
+process restart. Now persisted, so titles survive backend restarts
+instead of re-extracting metadata for every ingested paper on every
+Planner call after a restart.
 """
 
+from researchmind.kv_store import get_value, set_value
 from researchmind.metadata_extraction import extract_metadata
 
-_title_cache: dict[str, str] = {}
+NAMESPACE = "paper_titles"
 
 
 def get_paper_title(source_file: str) -> str:
@@ -23,8 +20,9 @@ def get_paper_title(source_file: str) -> str:
     on first call. Falls back to the filename itself if extraction fails,
     so a single bad/unparseable paper can't break routing for every query.
     """
-    if source_file in _title_cache:
-        return _title_cache[source_file]
+    cached = get_value(NAMESPACE, source_file)
+    if cached is not None:
+        return cached
 
     try:
         metadata = extract_metadata(source_file)
@@ -32,7 +30,7 @@ def get_paper_title(source_file: str) -> str:
     except Exception:
         title = source_file
 
-    _title_cache[source_file] = title
+    set_value(NAMESPACE, source_file, title)
     return title
 
 
