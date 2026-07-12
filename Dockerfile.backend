@@ -8,14 +8,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml ./
 COPY src ./src
-COPY scripts ./scripts
 
-# Install CPU-only torch BEFORE the editable install, so pip's resolver
-# sees it already satisfied and skips pulling ~2GB of unused CUDA wheels
-# that sentence-transformers would otherwise drag in on a GPU-less container.
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-
 RUN pip install --no-cache-dir -e .
+
+# Run as an unprivileged user rather than root — standard container
+# hardening, limits blast radius if the container is ever compromised.
+# Directories the app writes to (chroma_db, data, logs) must be owned by
+# this user, since they're created fresh inside the image here and then
+# overlaid by bind mounts at runtime via docker-compose.yml.
+RUN useradd --create-home --shell /bin/bash appuser \
+    && mkdir -p /app/chroma_db /app/data /app/logs \
+    && chown -R appuser:appuser /app
+USER appuser
 
 EXPOSE 8000
 

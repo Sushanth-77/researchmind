@@ -17,6 +17,8 @@ requires a matching X-API-Key header. If unset, the API runs open — a
 loud warning is printed at startup so this isn't silently forgotten.
 """
 
+import re
+import secrets
 import uuid
 from pathlib import Path
 
@@ -62,15 +64,41 @@ def verify_api_key(provided_key: str = Security(_api_key_header)) -> None:
     Auth dependency applied to every non-health endpoint.
 
     No-op (auth disabled) if API_KEY isn't configured — see the startup
-    warning above. When API_KEY is set, the header must match exactly.
+    warning above. When API_KEY is set, the header must match exactly,
+    compared in constant time so response timing can't leak information
+    about how many leading characters of a guess were correct.
     """
     if API_KEY is None:
         return
-    if provided_key != API_KEY:
+    if not secrets.compare_digest(provided_key or "", API_KEY):
         raise HTTPException(
             status_code=401,
             detail="Missing or invalid API key. Provide it via the X-API-Key header.",
         )
+
+
+def _sanitize_filename(filename: str) -> str:
+    """
+    Reduce a client-supplied filename to a safe basename before it's used
+    to build a filesystem path.
+
+    Guards against path traversal (e.g. "../../etc/passwd" or
+    "..\\..\\Windows\\..."): Path(...).name strips any directory
+    components regardless of separator style, and the regex further
+    restricts the result to a conservative safe character set so nothing
+    unexpected (null bytes, control characters, etc.) reaches disk.
+
+    Raises:
+        HTTPException: 400, if the filename is empty or becomes empty
+            after sanitization (e.g. the input was pure path separators).
+    """
+    basename = Path(filename).name
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", basename)
+
+    if not safe or safe in (".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+
+    return safe
 
 
 @app.exception_handler(ValueError)
@@ -133,14 +161,22 @@ async def ingest_paper(file: UploadFile, background_tasks: BackgroundTasks) -> I
     Accept a PDF upload and ingest it in the background.
 
     Returns immediately with a task_id; poll GET /papers/ingest/{task_id}
-    for completion status. Rejects non-PDF uploads before saving anything.
+    for completion status. Rejects non-PDF uploads and sanitizes the
+    filename before it's ever used to construct a filesystem path.
     """
-    if not file.filename.lower().endswith(".pdf"):
+    safe_filename = _sanitize_filename(file.filename)
+
+    if not safe_filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only .pdf files are accepted.")
 
     papers_dir = DATA_DIR / "papers"
     papers_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = papers_dir / file.filename
+    pdf_path = papers_dir / safe_filename
+
+    # Defense in depth: even after sanitization, confirm the resolved path
+    # still lands inside papers_dir before writing anything to disk.
+    if papers_dir.resolve() not in pdf_path.resolve().parents:
+        raise HTTPException(status_code=400, detail="Invalid filename.")
 
     contents = await file.read()
     if not contents:
@@ -149,10 +185,10 @@ async def ingest_paper(file: UploadFile, background_tasks: BackgroundTasks) -> I
     pdf_path.write_bytes(contents)
 
     task_id = str(uuid.uuid4())[:8]
-    task_store.create_task(task_id, filename=file.filename)
+    task_store.create_task(task_id, filename=safe_filename)
     background_tasks.add_task(run_ingestion, task_id, pdf_path)
 
-    return IngestResponse(task_id=task_id, filename=file.filename, status="processing")
+    return IngestResponse(task_id=task_id, filename=safe_filename, status="processing")
 
 
 @app.get(
