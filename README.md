@@ -182,3 +182,6 @@ researchmind/
 ├── scripts/                  # CLI entry points for every capability
 ├── Dockerfile.backend / Dockerfile.frontend / docker-compose.yml
 └── DEPLOYMENT.md
+
+
+[![Tests](https://github.com/Sushanth-77/researchmind/actions/workflows/tests.yml/badge.svg)](https://github.com/Sushanth-77/researchmind/actions/workflows/tests.yml)

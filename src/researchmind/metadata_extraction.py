@@ -1,15 +1,23 @@
 """
-Structured metadata extraction with retry/repair.
+Structured metadata extraction with retry/repair and persistent caching.
 
 The free Groq model is not guaranteed to return valid JSON on the first
 try. Rather than fail outright, we send the parsing/validation error back
 to the model and ask it to correct its own output, up to MAX_ATTEMPTS times.
+
+Extraction results are cached per source_file in the shared SQLite
+kv_store. Previously, analyze_trends_and_gaps, generate_survey, and
+populate_graph_for_all_papers each re-ran extraction (a real Groq call)
+on every invocation, even though a paper's metadata never changes once
+extracted. The cache check happens before any retrieval or Groq work, so
+a cache hit costs nothing beyond one SQLite read.
 """
 
 import json
 
 from pydantic import ValidationError
 
+from researchmind.kv_store import get_value, set_value
 from researchmind.observability import call_groq
 from researchmind.retrieval import retrieve_from_source
 from researchmind.schemas import PaperMetadata
@@ -18,6 +26,8 @@ from researchmind.vectorstore import get_chunks_by_source
 MAX_ATTEMPTS = 3
 OPENING_CHUNKS_COUNT = 3
 SEMANTIC_TOP_K = 5
+
+CACHE_NAMESPACE = "paper_metadata"
 
 SYSTEM_PROMPT = """You are a metadata extraction assistant for research papers. \
 You will be given excerpts from a paper and must extract structured metadata.
@@ -41,12 +51,6 @@ def _gather_context(source_file: str) -> str:
     methodology/dataset/metric-relevant chunks, deduplicated by chunk_index.
 
     Both retrieval steps are scoped to source_file via retrieve_from_source.
-    Previously the semantic step used the unscoped retrieve(), which let
-    other papers' chunks leak into this paper's extraction context whenever
-    their content scored well against the semantic query — this caused a
-    reproducible cross-paper attribution bug (e.g. one paper's dataset
-    description bleeding into another paper's metadata). Fixed by scoping
-    both retrieval calls to the same source_file.
     """
     all_chunks = get_chunks_by_source(source_file)
     opening = all_chunks[:OPENING_CHUNKS_COUNT]
@@ -86,11 +90,19 @@ def extract_metadata(source_file: str) -> PaperMetadata:
     Extract structured metadata for a paper, with retry-and-repair on
     malformed or schema-invalid JSON output.
 
+    Checks the persistent cache first — a paper's metadata is static once
+    extracted, so repeated calls (from analysis, survey, graph population,
+    or the title cache) after the first never re-hit Groq or retrieval.
+
     Raises:
         ValueError: if source_file has no chunks in the vector store.
         RuntimeError: if Groq fails to produce valid output after
             MAX_ATTEMPTS tries, or if the API itself fails.
     """
+    cached = get_value(CACHE_NAMESPACE, source_file, as_json=True)
+    if cached is not None:
+        return PaperMetadata.model_validate(cached)
+
     context = _gather_context(source_file)
 
     messages = [
@@ -111,7 +123,9 @@ def extract_metadata(source_file: str) -> PaperMetadata:
 
         try:
             data = json.loads(cleaned)
-            return PaperMetadata.model_validate(data)
+            metadata = PaperMetadata.model_validate(data)
+            set_value(CACHE_NAMESPACE, source_file, metadata.model_dump())
+            return metadata
         except json.JSONDecodeError as exc:
             last_error = f"Your response was not valid JSON: {exc}"
         except ValidationError as exc:

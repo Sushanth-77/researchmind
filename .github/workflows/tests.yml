@@ -1,0 +1,36 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install CPU-only torch first
+        # sentence-transformers pulls torch transitively; the default PyPI
+        # index resolves the full CUDA build on Linux runners, which is
+        # multi-gigabyte and unnecessary here (no GPU in CI). Installing
+        # the CPU-only wheel first, same fix applied to the Dockerfiles,
+        # keeps this workflow fast.
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install project (with dev dependencies)
+        run: pip install -e ".[dev]"
+
+      - name: Run unit tests
+        env:
+          # A placeholder is sufficient: config.py only checks that this
+          # is set and non-placeholder at import time. No test in tests/
+          # makes a real Groq API call — all Groq interaction is mocked.
+          GROQ_API_KEY: ci-placeholder-key-not-real
+        run: pytest tests/ -v
