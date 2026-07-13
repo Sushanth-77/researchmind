@@ -1,22 +1,8 @@
 """
 FastAPI application wrapping the ResearchMind LangGraph orchestration.
-
-Endpoints:
-- POST /papers/ingest        upload a PDF, ingestion runs in the background
-- GET  /papers/ingest/{id}   poll ingestion status
-- GET  /papers               list papers currently in the vector store
-- POST /query                run a query through the orchestration graph
-- GET  /health                basic liveness check (never requires auth)
-
-Every domain exception, request-validation failure, and raised
-HTTPException is mapped to a uniform ErrorResponse body, so callers
-(including the Streamlit frontend) can handle all errors the same way.
-
-Authentication: if config.API_KEY is set, every endpoint except /health
-requires a matching X-API-Key header. If unset, the API runs open — a
-loud warning is printed at startup so this isn't silently forgotten.
 """
 
+import ntpath
 import re
 import secrets
 import uuid
@@ -82,17 +68,20 @@ def _sanitize_filename(filename: str) -> str:
     Reduce a client-supplied filename to a safe basename before it's used
     to build a filesystem path.
 
-    Guards against path traversal (e.g. "../../etc/passwd" or
-    "..\\..\\Windows\\..."): Path(...).name strips any directory
-    components regardless of separator style, and the regex further
-    restricts the result to a conservative safe character set so nothing
-    unexpected (null bytes, control characters, etc.) reaches disk.
+    Uses ntpath.basename() rather than pathlib.Path(...).name — pathlib's
+    separator handling is platform-dependent (only '/' on Linux, both '/'
+    and '\\' on Windows), which meant a Windows-style traversal attempt
+    like "..\\..\\evil.pdf" was NOT stripped correctly when this ran on a
+    Linux CI runner, even though it worked fine locally on Windows. ntpath
+    is a pure string-splitting module that always treats both separators
+    as path boundaries, regardless of the host OS actually running this
+    code — so behavior is now identical on Windows, Linux, and in Docker.
 
     Raises:
         HTTPException: 400, if the filename is empty or becomes empty
             after sanitization (e.g. the input was pure path separators).
     """
-    basename = Path(filename).name
+    basename = ntpath.basename(filename)
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", basename)
 
     if not safe or safe in (".", ".."):
@@ -173,8 +162,6 @@ async def ingest_paper(file: UploadFile, background_tasks: BackgroundTasks) -> I
     papers_dir.mkdir(parents=True, exist_ok=True)
     pdf_path = papers_dir / safe_filename
 
-    # Defense in depth: even after sanitization, confirm the resolved path
-    # still lands inside papers_dir before writing anything to disk.
     if papers_dir.resolve() not in pdf_path.resolve().parents:
         raise HTTPException(status_code=400, detail="Invalid filename.")
 
