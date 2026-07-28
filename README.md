@@ -14,19 +14,6 @@ backend, or an MCP server.
 
 ---
 
-## Resume
-
-> **ResearchMind — Multi-Agent Research Paper Analysis Platform**
->
-> – Architected a multi-agent orchestration system using **LangGraph** with six specialised agents (Planner, Extractor, QA, Analysis, Survey, Knowledge Graph), implementing isolated per-agent state namespaces, retry-and-repair loops for structured LLM output, and multi-turn conversation memory for follow-up resolution.
->
-> – Built a **hybrid BM25 + embedding retrieval** pipeline (ChromaDB + sentence-transformers, local CPU) with grounded RAG Q&A, explicit refusal on insufficient context, Pydantic-validated metadata extraction, and multi-paper comparison with per-paper filtered retrieval and cross-paper attribution.
->
-> – Engineered a production-grade **FastAPI backend** with background PDF ingestion, persistent SQLite-backed task/cache store, duplicate upload detection (HTTP 409), 50 MB size guard (HTTP 413), and a `DELETE /papers/{filename}` endpoint; decoupled from a Streamlit frontend and exposed as an **MCP server** compatible with Claude Desktop.
->
-> – Implemented an **observability and resilience layer** — structured JSONL logging of every Groq call (tokens, latency, retry count), exponential backoff with per-exception retry classification, process-level client singletons for Groq and ChromaDB, and a corpus-aware regression eval harness built from hand-verified query/answer pairs.
-
----
 
 ## Features
 
