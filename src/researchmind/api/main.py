@@ -158,6 +158,15 @@ async def ingest_paper(file: UploadFile, background_tasks: BackgroundTasks) -> I
     if not safe_filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only .pdf files are accepted.")
 
+    # Guard: reject if the same filename is already being ingested.
+    # A second upload would overwrite the file on disk mid-read by the
+    # first background task, silently corrupting that ingestion.
+    if task_store.is_filename_processing(safe_filename):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{safe_filename!r} is already being ingested. Wait for it to complete before re-uploading.",
+        )
+
     papers_dir = DATA_DIR / "papers"
     papers_dir.mkdir(parents=True, exist_ok=True)
     pdf_path = papers_dir / safe_filename
