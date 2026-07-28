@@ -36,6 +36,11 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# Maximum allowed upload size (50 MB). Research PDFs are rarely larger;
+# accepting unbounded files would load the entire upload into RAM before
+# any validation runs, making the service trivially OOM-able.
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+
 if API_KEY is None:
     print(
         "⚠️  API_KEY not set — the API is running WITHOUT authentication. "
@@ -177,6 +182,13 @@ async def ingest_paper(file: UploadFile, background_tasks: BackgroundTasks) -> I
     contents = await file.read()
     if not contents:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    # Guard: enforce upload size limit before writing to disk.
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large ({len(contents) / 1_048_576:.1f} MB). Maximum allowed size is {MAX_UPLOAD_BYTES // 1_048_576} MB.",
+        )
 
     pdf_path.write_bytes(contents)
 
