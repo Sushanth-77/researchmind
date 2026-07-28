@@ -133,15 +133,24 @@ def kg_node(state: GraphState) -> dict:
 
 
 def route_by_intent(state: GraphState) -> str:
-    """Conditional edge: send to the node matching the Planner's intent."""
+    """Conditional edge: send to the node matching the Planner's intent.
+
+    The QA agent (qa_agent.answer) already handles the 'comparison' intent
+    correctly \u2014 it calls compare_papers() when 2+ source files are present.
+    Listing 'comparison' explicitly here keeps the map in sync with every
+    intent the PlannerDecision schema can emit, so a future reader doesn't
+    have to hunt through the code to understand where comparisons go.
+    """
     decision = state["planner"]["decision"]
     routing_map = {
         "metadata_extraction": "extractor",
         "analysis": "analysis",
         "survey": "survey",
         "knowledge_graph": "kg",
+        "comparison": "qa",   # qa_agent calls compare_papers when len(source_files) >= 2
     }
     return routing_map.get(decision.intent, "qa")
+
 
 
 def _format_metadata_answer(metadata_by_file: dict[str, PaperMetadata]) -> str:
