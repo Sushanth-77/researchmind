@@ -13,6 +13,7 @@ import streamlit as st
 from researchmind.frontend.api_client import (
     APIError,
     check_health,
+    delete_paper,
     get_ingest_status,
     ingest_paper,
     list_papers,
@@ -23,6 +24,9 @@ st.set_page_config(page_title="ResearchMind", page_icon="📚", layout="wide")
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+if "pending_delete" not in st.session_state:
+    st.session_state.pending_delete = None
+
 
 
 def _show_api_error(exc: APIError) -> None:
@@ -78,7 +82,25 @@ with tab_papers:
         papers = list_papers()
         if papers:
             for paper in papers:
-                st.write(f"- {paper}")
+                col_name, col_btn = st.columns([6, 1])
+                col_name.write(f"- {paper}")
+
+                # Two-step delete: arm with 🗑️, confirm with a warning button.
+                # This prevents accidental deletion with a single mis-click.
+                if st.session_state.pending_delete == paper:
+                    if col_btn.button("✅ Confirm", key=f"confirm_{paper}", type="primary"):
+                        try:
+                            result = delete_paper(paper)
+                            st.success(f"🗑️ Deleted '{paper}' ({result['chunks_deleted']} chunks removed).")
+                            st.session_state.pending_delete = None
+                            st.rerun()
+                        except APIError as exc:
+                            _show_api_error(exc)
+                            st.session_state.pending_delete = None
+                else:
+                    if col_btn.button("🗑️", key=f"delete_{paper}", help=f"Delete {paper}"):
+                        st.session_state.pending_delete = paper
+                        st.rerun()
         else:
             st.info("No papers ingested yet. Upload one above to get started.")
     except APIError as exc:

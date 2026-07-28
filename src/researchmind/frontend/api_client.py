@@ -85,3 +85,8 @@ def get_ingest_status(task_id: str) -> dict:
 def run_query(query: str, conversation_history: list[dict] | None = None) -> dict:
     payload = {"query": query, "conversation_history": conversation_history or []}
     return _request("POST", "/query", json=payload)
+
+
+def delete_paper(filename: str) -> dict:
+    """Delete a paper from the vector store by filename."""
+    return _request("DELETE", f"/papers/{filename}")

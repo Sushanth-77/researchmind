@@ -60,3 +60,9 @@ class QueryResponse(BaseModel):
 class ErrorResponse(BaseModel):
     error: str
     detail: str
+
+
+class DeletePaperResponse(BaseModel):
+    filename: str
+    chunks_deleted: int
+    message: str

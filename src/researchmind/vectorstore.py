@@ -13,6 +13,7 @@ from chromadb.api.models.Collection import Collection
 from researchmind.config import CHROMA_DIR
 from researchmind.embeddings import embed_texts
 from researchmind.ingestion import Chunk
+from researchmind.kv_store import delete_value
 
 COLLECTION_NAME = "papers"
 
@@ -128,3 +129,28 @@ def list_source_files() -> list[str]:
 
     sources = {m["source_file"] for m in results["metadatas"]}
     return sorted(sources)
+
+
+def delete_source(source_file: str) -> int:
+    """
+    Delete all chunks for source_file from the collection and evict its
+    cached metadata from the kv_store.
+
+    Returns the number of chunks deleted.
+
+    Raises:
+        ValueError: if no chunks exist for source_file.
+    """
+    collection = get_collection()
+    existing = collection.get(where={"source_file": source_file}, include=["metadatas"])
+    if not existing["ids"]:
+        raise ValueError(f"No chunks found for source_file: {source_file}")
+
+    chunk_count = len(existing["ids"])
+    collection.delete(where={"source_file": source_file})
+
+    # Evict the cached metadata so a re-ingested paper with the same name
+    # always gets fresh extraction rather than serving stale cached data.
+    delete_value("paper_metadata", source_file)
+
+    return chunk_count

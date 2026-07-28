@@ -77,3 +77,17 @@ def get_value(namespace: str, key: str, as_json: bool = False) -> Optional[Union
     if row is None:
         return None
     return json.loads(row[0]) if as_json else row[0]
+
+
+def delete_value(namespace: str, key: str) -> None:
+    """Remove a (namespace, key) entry. No-op if the key doesn't exist."""
+    with _write_lock:
+        conn = _get_connection()
+        try:
+            conn.execute(
+                "DELETE FROM kv_store WHERE namespace = ? AND key = ?",
+                (namespace, key),
+            )
+            conn.commit()
+        finally:
+            conn.close()

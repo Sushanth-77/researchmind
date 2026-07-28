@@ -18,6 +18,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from researchmind.api import task_store
 from researchmind.api.ingestion_service import run_ingestion
 from researchmind.api.schemas import (
+    DeletePaperResponse,
     ErrorResponse,
     IngestResponse,
     IngestStatusResponse,
@@ -28,7 +29,7 @@ from researchmind.api.schemas import (
 )
 from researchmind.config import API_KEY, DATA_DIR
 from researchmind.graph import run_query
-from researchmind.vectorstore import list_source_files
+from researchmind.vectorstore import delete_source, list_source_files
 
 app = FastAPI(
     title="ResearchMind API",
@@ -223,6 +224,34 @@ def get_ingest_status(task_id: str) -> IngestStatusResponse:
 def get_papers() -> PapersListResponse:
     """List papers currently stored in the vector store."""
     return PapersListResponse(papers=list_source_files())
+
+
+@app.delete(
+    "/papers/{filename}",
+    response_model=DeletePaperResponse,
+    dependencies=[Depends(verify_api_key)],
+)
+def delete_paper(filename: str) -> DeletePaperResponse:
+    """
+    Remove a paper from the vector store by filename.
+
+    Deletes all stored chunks for the paper from ChromaDB and evicts its
+    cached metadata from the kv_store, so a re-upload of the same filename
+    will always get fresh metadata extraction.
+
+    Raises 404 if the paper is not found in the vector store.
+    """
+    safe_filename = _sanitize_filename(filename)
+    try:
+        chunks_deleted = delete_source(safe_filename)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Paper not found: {safe_filename}")
+
+    return DeletePaperResponse(
+        filename=safe_filename,
+        chunks_deleted=chunks_deleted,
+        message=f"Deleted {chunks_deleted} chunks for '{safe_filename}'.",
+    )
 
 
 @app.post("/query", response_model=QueryResponse, dependencies=[Depends(verify_api_key)])
