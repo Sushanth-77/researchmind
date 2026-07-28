@@ -21,6 +21,7 @@ from researchmind.kv_store import get_value, set_value
 from researchmind.observability import call_groq
 from researchmind.retrieval import retrieve_from_source
 from researchmind.schemas import PaperMetadata
+from researchmind.utils import strip_code_fences
 from researchmind.vectorstore import get_chunks_by_source
 
 MAX_ATTEMPTS = 3
@@ -73,18 +74,6 @@ def _gather_context(source_file: str) -> str:
     return "\n\n".join(f"[chunk {idx}]\n{text}" for idx, text in combined)
 
 
-def _strip_code_fences(text: str) -> str:
-    """Defensively strip markdown code fences if the model adds them anyway."""
-    text = text.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        lines = lines[1:] if lines[0].startswith("```") else lines
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines)
-    return text.strip()
-
-
 def extract_metadata(source_file: str) -> PaperMetadata:
     """
     Extract structured metadata for a paper, with retry-and-repair on
@@ -119,7 +108,7 @@ def extract_metadata(source_file: str) -> PaperMetadata:
             max_tokens=800,
         )
         raw_output = result.content
-        cleaned = _strip_code_fences(raw_output)
+        cleaned = strip_code_fences(raw_output)
 
         try:
             data = json.loads(cleaned)

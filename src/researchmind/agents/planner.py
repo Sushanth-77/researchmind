@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from researchmind.agents.messages import AgentMessage
 from researchmind.observability import call_groq
 from researchmind.schemas import PlannerDecision
+from researchmind.utils import strip_code_fences
 
 MAX_ATTEMPTS = 3
 
@@ -68,17 +69,6 @@ user names them; otherwise leave source_files as an empty array to signal "use a
 ingested papers." Never invent a filename not in the available list."""
 
 
-def _strip_code_fences(text: str) -> str:
-    text = text.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        lines = lines[1:] if lines[0].startswith("```") else lines
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines)
-    return text.strip()
-
-
 def plan(query: str, available_files: list[str], file_titles: dict[str, str] | None = None) -> AgentMessage:
     """
     Produce a routing decision for a query.
@@ -110,7 +100,7 @@ def plan(query: str, available_files: list[str], file_titles: dict[str, str] | N
             max_tokens=300,
         )
         raw_output = result.content
-        cleaned = _strip_code_fences(raw_output)
+        cleaned = strip_code_fences(raw_output)
 
         try:
             data = json.loads(cleaned)
