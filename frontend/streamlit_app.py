@@ -156,11 +156,31 @@ with tab_compare:
         if st.button("Compare", disabled=len(selected) < 2):
             papers_list = ", ".join(selected[:-1]) + f", and {selected[-1]}" if len(selected) > 2 else " and ".join(selected)
             comparison_query = f"Compare the {aspect} of {papers_list}"
+
+            # Pass the full conversation history so follow-up comparisons
+            # ("now compare their datasets instead") can resolve against the
+            # prior comparison turn — previously this always sent empty history.
+            history_payload = [
+                {"role": m["role"], "content": m["content"]}
+                for m in st.session_state.chat_history
+            ]
+
             with st.spinner(f"Comparing {len(selected)} papers..."):
                 try:
-                    result = run_query(comparison_query)
+                    result = run_query(comparison_query, history_payload)
                     st.markdown(result["answer"])
                     st.caption(f"Intent: `{result['intent']}` | Sources: {result['source_files']}")
+
+                    # Append to chat_history so the Chat tab can reference
+                    # this comparison in follow-up questions.
+                    st.session_state.chat_history.append({"role": "user", "content": comparison_query})
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": result["answer"],
+                        "intent": result["intent"],
+                        "source_files": result["source_files"],
+                    })
+
                     if len(result["source_files"]) != len(selected):
                         st.warning(
                             f"⚠️ You selected {len(selected)} papers, but the response only used "
@@ -169,4 +189,4 @@ with tab_compare:
                             f"this happens often."
                         )
                 except APIError as exc:
-                    _show_api_error(exc)
+                    _show_api_error(exc)
