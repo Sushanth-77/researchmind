@@ -16,11 +16,22 @@ from researchmind.ingestion import Chunk
 
 COLLECTION_NAME = "papers"
 
+_chroma_client: chromadb.ClientAPI | None = None
+_chroma_collection: Collection | None = None
+
 
 def get_client() -> chromadb.ClientAPI:
-    """Return a persistent local Chroma client."""
-    CHROMA_DIR.mkdir(parents=True, exist_ok=True)
-    return chromadb.PersistentClient(path=str(CHROMA_DIR))
+    """Return a persistent local Chroma client singleton.
+
+    Creating a PersistentClient re-opens the underlying SQLite store.
+    Caching it as a module-level singleton means that cost is paid once
+    per process rather than once per vectorstore call.
+    """
+    global _chroma_client
+    if _chroma_client is None:
+        CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+        _chroma_client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+    return _chroma_client
 
 
 def get_collection() -> Collection:
@@ -29,13 +40,18 @@ def get_collection() -> Collection:
 
     hnsw:space must be set at creation time — it cannot be changed on an
     existing collection, so this is only applied the first time the
-    collection is created.
+    collection is created.  The collection object is cached for the same
+    reason the client is: every call to get_or_create_collection hits
+    Chroma's internal metadata store.
     """
-    client = get_client()
-    return client.get_or_create_collection(
-        name=COLLECTION_NAME,
-        metadata={"hnsw:space": "cosine"},
-    )
+    global _chroma_collection
+    if _chroma_collection is None:
+        client = get_client()
+        _chroma_collection = client.get_or_create_collection(
+            name=COLLECTION_NAME,
+            metadata={"hnsw:space": "cosine"},
+        )
+    return _chroma_collection
 
 
 def store_chunks(chunks: list[Chunk]) -> None:
@@ -100,9 +116,12 @@ def list_source_files() -> list[str]:
 
     Used by the Planner agent to know which papers it can route queries to,
     without hardcoding filenames anywhere.
+
+    include=["metadatas"] is specified explicitly so Chroma does not also
+    fetch document text and embeddings — we only need the metadata here.
     """
     collection = get_collection()
-    results = collection.get()
+    results = collection.get(include=["metadatas"])
 
     if not results["metadatas"]:
         return []
