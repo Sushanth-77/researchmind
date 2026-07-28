@@ -49,6 +49,8 @@ def test_call_groq_retries_transient_errors_then_succeeds(monkeypatch):
     monkeypatch.setattr(obs, "MAX_RETRIES", 3)
     monkeypatch.setattr(obs, "BASE_BACKOFF_SECONDS", 0.01)
     monkeypatch.setattr(obs.time, "sleep", lambda _: None)
+    # Reset the singleton so the patched Groq factory is called fresh.
+    monkeypatch.setattr(obs, "_groq_client", None)
 
     call_count = {"n": 0}
 
@@ -77,6 +79,8 @@ def test_call_groq_raises_runtimeerror_after_exhausting_retries(monkeypatch):
     monkeypatch.setattr(obs, "MAX_RETRIES", 2)
     monkeypatch.setattr(obs, "BASE_BACKOFF_SECONDS", 0.01)
     monkeypatch.setattr(obs.time, "sleep", lambda _: None)
+    # Reset the singleton so the patched Groq factory is called fresh.
+    monkeypatch.setattr(obs, "_groq_client", None)
 
     def always_fails(*args, **kwargs):
         raise _FakeTransientError("always fails")
@@ -97,6 +101,8 @@ def test_call_groq_does_not_retry_non_retryable_errors(monkeypatch):
     not retry MAX_RETRIES times."""
     monkeypatch.setattr(obs, "RETRYABLE_EXCEPTIONS", (_FakeTransientError,))
     monkeypatch.setattr(obs, "MAX_RETRIES", 3)
+    # Reset the singleton so the patched Groq factory is called fresh.
+    monkeypatch.setattr(obs, "_groq_client", None)
 
     call_count = {"n": 0}
 

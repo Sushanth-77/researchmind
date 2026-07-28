@@ -35,6 +35,21 @@ BASE_BACKOFF_SECONDS = 2.0
 
 RETRYABLE_EXCEPTIONS = (RateLimitError, APIConnectionError, APITimeoutError, InternalServerError)
 
+_groq_client: Groq | None = None
+
+
+def _get_groq_client() -> Groq:
+    """Return a process-level Groq client singleton.
+
+    Instantiating Groq() initialises an HTTP transport and sets auth
+    headers — doing this once per process (not once per call) removes
+    measurable overhead at high call volumes.
+    """
+    global _groq_client
+    if _groq_client is None:
+        _groq_client = Groq(api_key=GROQ_API_KEY)
+    return _groq_client
+
 
 @dataclass
 class GroqCallResult:
@@ -62,7 +77,7 @@ def call_groq(
         RuntimeError: if the call fails after all retries, or fails with
             a non-retryable error.
     """
-    client = Groq(api_key=GROQ_API_KEY)
+    client = _get_groq_client()
     last_exception: Exception | None = None
 
     for attempt in range(1, MAX_RETRIES + 1):
@@ -114,7 +129,12 @@ def call_groq(
                 retry_attempts=attempt,
             )
 
-    raise RuntimeError(f"Groq API call failed: {last_exception}")
+    # NOTE: this line is intentionally unreachable — the loop always either
+    # returns on success, raises immediately on non-retryable errors, or
+    # raises RuntimeError on the final retry attempt (see the branch at
+    # `if attempt < MAX_RETRIES` above).  It is kept as a safety net for
+    # any future refactor that changes the loop exit conditions.
+    raise RuntimeError(f"Groq API call failed: {last_exception}")  # pragma: no cover
 
 
 def _log_entry(
